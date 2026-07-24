@@ -1,4 +1,4 @@
-﻿import { downloadBlob, readFileAsArrayBuffer, showNotification, escapeHtml, formatFileSize } from './utils.js';
+import { downloadBlob, readFileAsArrayBuffer, showNotification, escapeHtml, formatFileSize } from './utils.js';
 
 let mergeFiles = [];
 
