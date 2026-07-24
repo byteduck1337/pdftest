@@ -1,6 +1,7 @@
-﻿import { 
+import { 
     downloadBlob, readFileAsDataURL, readFileAsArrayBuffer, 
-    showNotification, escapeHtml, getFileType, formatFileSize 
+    showNotification, escapeHtml, getFileType, formatFileSize,
+    createImageFromDataUrl, dataUrlToBlob
 } from './utils.js';
 
 let files = [];
@@ -214,10 +215,7 @@ export function initConverter() {
             for (const f of files) {
                 console.log('Processing file:', f.name, f.type);
                 if (f.type === 'image') {
-                    const img = new Image();
-                    img.src = f.dataUrl;
-                    await new Promise(resolve => { img.onload = resolve; });
-                    
+                    const img = await createImageFromDataUrl(f.dataUrl);
                     let imageEmbed;
                     const ext = f.name.split('.').pop().toLowerCase();
                     if (ext === 'png') {
@@ -225,48 +223,48 @@ export function initConverter() {
                     } else {
                         imageEmbed = await pdfDoc.embedJpg(f.dataUrl);
                     }
-                    
                     const page = pdfDoc.addPage([img.width, img.height]);
                     page.drawImage(imageEmbed, { x: 0, y: 0, width: img.width, height: img.height });
                 } else if (f.type === 'document') {
                     const ext = f.name.split('.').pop().toLowerCase();
-                    if (ext === 'docx') {
-                        try {
+                    const page = pdfDoc.addPage([595, 842]);
+                    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
+                    
+                    try {
+                        let text = '';
+                        if (ext === 'docx') {
                             const result = await mammoth.convertToHtml({ arrayBuffer: await f.file.arrayBuffer() });
-                            const text = result.value.replace(/<[^>]*>/g, ' ').trim();
-                            const page = pdfDoc.addPage([595, 842]);
-                            const font = await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
-                            const words = text.split(/\s+/);
-                            let line = '';
-                            let y = 800;
-                            for (const word of words) {
-                                if ((line + ' ' + word).length > 80) {
-                                    page.drawText(line, { x: 40, y, size: 12, font });
-                                    y -= 18;
-                                    line = word;
-                                } else {
-                                    line = line ? line + ' ' + word : word;
-                                }
-                            }
-                            if (line) page.drawText(line, { x: 40, y, size: 12, font });
-                        } catch (e) {
-                            console.error('DOCX conversion error:', e);
-                            showNotification('Ошибка конвертации DOCX: ' + e.message, 'error');
+                            text = result.value.replace(/<[^>]*>/g, ' ').trim();
+                        } else {
+                            text = await f.file.text();
                         }
-                    } else {
-                        const text = await f.file.text();
-                        const page = pdfDoc.addPage([595, 842]);
-                        const font = await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
-                        const lines = text.split('\n').filter(l => l.trim());
-                        lines.forEach((line, i) => {
-                            if (i < 40) {
-                                page.drawText(line.substring(0, 100), {
-                                    x: 40,
-                                    y: 800 - i * 18,
-                                    size: 12,
-                                    font
-                                });
+                        
+                        const words = text.split(/\s+/);
+                        let line = '';
+                        let y = 800;
+                        let fontSize = 12;
+                        
+                        for (const word of words) {
+                            const testLine = line ? line + ' ' + word : word;
+                            if (testLine.length > 80) {
+                                if (line) {
+                                    page.drawText(line, { x: 40, y, size: fontSize, font });
+                                    y -= fontSize + 4;
+                                }
+                                line = word;
+                            } else {
+                                line = testLine;
                             }
+                            if (y < 40) break;
+                        }
+                        if (line && y > 40) {
+                            page.drawText(line, { x: 40, y, size: fontSize, font });
+                        }
+                    } catch (e) {
+                        console.error('Document conversion error:', e);
+                        page.drawText('Ошибка конвертации документа', {
+                            x: 40, y: 800, size: 16, font,
+                            color: { r: 1, g: 0, b: 0 }
                         });
                     }
                 }
@@ -312,18 +310,36 @@ export function initConverter() {
                 showNotification(`Создано ${pdfJsDoc.numPages} PNG изображений`, 'success');
             } else {
                 const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfFiles[0].arrayBuffer }).promise;
-                let allText = '';
-                for (let i = 1; i <= pdfJsDoc.numPages; i++) {
+                const totalPages = pdfJsDoc.numPages;
+                
+                for (let i = 1; i <= totalPages; i++) {
                     const page = await pdfJsDoc.getPage(i);
-                    const content = await page.getTextContent();
-                    const text = content.items.map(item => item.str).join(' ');
-                    allText += text + '\n\n';
+                    const viewport = page.getViewport({ scale: 2 });
+                    const canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    const ctx = canvas.getContext('2d');
+                    await page.render({ canvasContext: ctx, viewport }).promise;
+                    
+                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    const reader = new FileReader();
+                    reader.onload = async function(e) {
+                        const dataUrl = e.target.result;
+                        const { PDFDocument } = PDFLib;
+                        const pdfDoc = await PDFDocument.create();
+                        const img = await pdfDoc.embedPng(dataUrl);
+                        const pageDoc = pdfDoc.addPage([img.width, img.height]);
+                        pageDoc.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
+                        const pdfBytes = await pdfDoc.save();
+                        downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), `page-${i}.pdf`);
+                    };
+                    reader.readAsDataURL(blob);
                 }
                 
-                const blob = new Blob([allText], { type: 'text/plain;charset=utf-8' });
-                downloadBlob(blob, 'extracted-text.txt');
-                updateStatus(`Текст извлечён из ${pdfJsDoc.numPages} страниц`, 'success');
-                showNotification('Текст извлечён в TXT файл', 'success');
+                setTimeout(() => {
+                    updateStatus(`Конвертация завершена! ${totalPages} страниц → PNG в PDF`, 'success');
+                    showNotification(`Создано ${totalPages} PDF страниц с изображениями`, 'success');
+                }, 1000);
             }
         } catch (error) {
             console.error('Convert from PDF error:', error);
