@@ -1,4 +1,4 @@
-﻿import { downloadBlob, readFileAsArrayBuffer, showNotification } from './utils.js';
+import { downloadBlob, readFileAsArrayBuffer, showNotification } from './utils.js';
 
 let pdfDoc = null;
 let pdfJsDoc = null;
@@ -14,6 +14,8 @@ let selectionStart = null;
 let canvas, ctx;
 let customFont = null;
 let currentPdfBytes = null;
+let isRendering = false;
+let renderTimeout = null;
 
 export function initPdfEditor() {
     console.log('PDF Editor module initializing');
@@ -194,15 +196,26 @@ export function initPdfEditor() {
 
     async function renderPage() {
         if (!pdfJsDoc) return;
+        if (isRendering) return;
+        
+        isRendering = true;
+        
         if (renderTask) {
-            try { await renderTask.cancel(); } catch(e) {}
+            try { 
+                await renderTask.cancel(); 
+            } catch(e) {}
             renderTask = null;
         }
+        
         try {
             const page = await pdfJsDoc.getPage(currentPage);
             const viewport = page.getViewport({ scale });
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
+            
+            if (canvas.width !== viewport.width || canvas.height !== viewport.height) {
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+            }
+            
             const renderContext = { canvasContext: ctx, viewport };
             renderTask = page.render(renderContext);
             await renderTask.promise;
@@ -224,9 +237,17 @@ export function initPdfEditor() {
                     fontSize: Math.abs(tx[0])
                 };
             });
-            clearSelection();
+            
+            if (selectedTextRange) {
+                highlightSelection(selectedTextRange);
+            }
+            
         } catch (err) {
-            console.warn('Render error:', err);
+            if (err.name !== 'RenderingCancelledException') {
+                console.warn('Render error:', err);
+            }
+        } finally {
+            isRendering = false;
         }
     }
 
@@ -238,8 +259,10 @@ export function initPdfEditor() {
         const newPage = currentPage + delta;
         if (newPage >= 1 && newPage <= totalPages) {
             currentPage = newPage;
+            selectedTextRange = null;
             await renderPage();
             updatePageInfo();
+            updateStatus();
         }
     }
 
@@ -299,7 +322,7 @@ export function initPdfEditor() {
             input.focus();
             input.select();
             updateStatus(`Выделено: "${selected.text.substring(0, 40)}${selected.text.length > 40 ? '...' : ''}"`);
-            highlightSelection(selected);
+            renderPage();
         } else {
             updateStatus('Текст не найден в выделенной области');
         }
@@ -323,6 +346,7 @@ export function initPdfEditor() {
     }
 
     function highlightSelection(selected) {
+        if (!selected || !selected.bounds) return;
         ctx.save();
         ctx.strokeStyle = '#6C5CE7';
         ctx.lineWidth = 2;
@@ -339,7 +363,9 @@ export function initPdfEditor() {
     function clearSelection() {
         selectedTextRange = null;
         document.getElementById('selectionBox').style.display = 'none';
-        if (pdfJsDoc) renderPage();
+        if (pdfJsDoc && !isRendering) {
+            renderPage();
+        }
     }
 
     async function onCanvasClick(e) {
@@ -566,6 +592,7 @@ export function initPdfEditor() {
         await loadCyrillicFont();
         pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
         totalPages = pdfJsDoc.numPages;
+        selectedTextRange = null;
         await renderPage();
         updatePageInfo();
     }
