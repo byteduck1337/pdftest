@@ -1,4 +1,4 @@
-﻿export function escapeHtml(unsafe) {
+export function escapeHtml(unsafe) {
     if (!unsafe) return '';
     return unsafe
         .replace(/&/g, "&amp;")
@@ -89,4 +89,17 @@ export function getFileType(filename) {
     if (imageExts.includes(ext)) return 'image';
     if (docExts.includes(ext) || excelExts.includes(ext)) return 'document';
     return 'unknown';
+}
+
+export function createImageFromDataUrl(dataUrl) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = dataUrl;
+    });
+}
+
+export function dataUrlToBlob(dataUrl) {
+    return fetch(dataUrl).then(res => res.blob());
 }
