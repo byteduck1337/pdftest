@@ -205,12 +205,27 @@ export function initConverter() {
         }
     });
 
+    async function loadUnicodeFont(pdfDoc) {
+        try {
+            const fontUrl = 'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf';
+            const fontBytes = await fetch(fontUrl).then(res => res.arrayBuffer());
+            pdfDoc.registerFontkit(window.fontkit);
+            return await pdfDoc.embedFont(fontBytes);
+        } catch (e) {
+            console.warn('Failed to load Roboto, falling back to TimesRoman:', e);
+            return await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
+        }
+    }
+
     async function convertToPdf(outputFormat) {
         console.log('Converting to PDF');
         try {
             updateStatus('Конвертация в PDF...', 'info');
             const { PDFDocument } = PDFLib;
             const pdfDoc = await PDFDocument.create();
+            
+            let unicodeFont = null;
+            let fontLoaded = false;
 
             for (const f of files) {
                 console.log('Processing file:', f.name, f.type);
@@ -226,44 +241,98 @@ export function initConverter() {
                     const page = pdfDoc.addPage([img.width, img.height]);
                     page.drawImage(imageEmbed, { x: 0, y: 0, width: img.width, height: img.height });
                 } else if (f.type === 'document') {
+                    if (!fontLoaded) {
+                        unicodeFont = await loadUnicodeFont(pdfDoc);
+                        fontLoaded = true;
+                    }
+                    
                     const ext = f.name.split('.').pop().toLowerCase();
                     const page = pdfDoc.addPage([595, 842]);
-                    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
                     
                     try {
                         let text = '';
                         if (ext === 'docx') {
                             const result = await mammoth.convertToHtml({ arrayBuffer: await f.file.arrayBuffer() });
                             text = result.value.replace(/<[^>]*>/g, ' ').trim();
+                        } else if (ext === 'doc' || ext === 'txt') {
+                            text = await f.file.text();
+                        } else if (ext === 'xls' || ext === 'xlsx') {
+                            text = await f.file.text();
                         } else {
                             text = await f.file.text();
                         }
                         
-                        const words = text.split(/\s+/);
-                        let line = '';
-                        let y = 800;
-                        let fontSize = 12;
+                        if (!text || text.trim().length === 0) {
+                            page.drawText('Документ не содержит текста', {
+                                x: 40,
+                                y: 800,
+                                size: 14,
+                                font: unicodeFont || await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman),
+                                color: { r: 0.7, g: 0.7, b: 0.7 }
+                            });
+                            continue;
+                        }
+
+                        const font = unicodeFont || await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
+                        const fontSize = 11;
+                        const maxWidth = 500;
+                        const lineHeight = fontSize + 4;
+                        
+                        let lines = [];
+                        let currentLine = '';
+                        let words = text.split(/\s+/);
                         
                         for (const word of words) {
-                            const testLine = line ? line + ' ' + word : word;
+                            if (!word) continue;
+                            const testLine = currentLine ? currentLine + ' ' + word : word;
                             if (testLine.length > 80) {
-                                if (line) {
-                                    page.drawText(line, { x: 40, y, size: fontSize, font });
-                                    y -= fontSize + 4;
+                                if (currentLine) {
+                                    lines.push(currentLine);
+                                    currentLine = word;
+                                } else {
+                                    lines.push(word);
+                                    currentLine = '';
                                 }
-                                line = word;
                             } else {
-                                line = testLine;
+                                currentLine = testLine;
                             }
-                            if (y < 40) break;
                         }
-                        if (line && y > 40) {
-                            page.drawText(line, { x: 40, y, size: fontSize, font });
+                        if (currentLine) lines.push(currentLine);
+
+                        let y = 800;
+                        for (const line of lines) {
+                            if (y < 40) break;
+                            try {
+                                page.drawText(line, {
+                                    x: 40,
+                                    y: y,
+                                    size: fontSize,
+                                    font: font,
+                                    color: { r: 0, g: 0, b: 0 }
+                                });
+                            } catch (e) {
+                                console.warn('Failed to draw text line, skipping:', line.substring(0, 20));
+                            }
+                            y -= lineHeight;
+                        }
+
+                        if (lines.length === 0) {
+                            page.drawText('(пустой документ)', {
+                                x: 40,
+                                y: 800,
+                                size: 12,
+                                font: font,
+                                color: { r: 0.5, g: 0.5, b: 0.5 }
+                            });
                         }
                     } catch (e) {
                         console.error('Document conversion error:', e);
-                        page.drawText('Ошибка конвертации документа', {
-                            x: 40, y: 800, size: 16, font,
+                        const fallbackFont = await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
+                        page.drawText('Ошибка конвертации документа: ' + e.message, {
+                            x: 40,
+                            y: 800,
+                            size: 12,
+                            font: fallbackFont,
                             color: { r: 1, g: 0, b: 0 }
                         });
                     }
@@ -337,7 +406,7 @@ export function initConverter() {
                 }
                 
                 setTimeout(() => {
-                    updateStatus(`Конвертация завершена! ${totalPages} страниц → PNG в PDF`, 'success');
+                    updateStatus(`Конвертация завершена! ${totalPages} страниц → PDF с изображениями`, 'success');
                     showNotification(`Создано ${totalPages} PDF страниц с изображениями`, 'success');
                 }, 1000);
             }
