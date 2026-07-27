@@ -21,7 +21,7 @@ export function initConverter() {
                     <select id="outputFormatSelect">
                         <option value="pdf">PDF</option>
                         <option value="png">PNG</option>
-                        <option value="docx">DOCX</option>
+                        <option value="jpg">JPG</option>
                         <option value="txt">TXT</option>
                     </select>
                 </label>
@@ -132,78 +132,136 @@ export function initConverter() {
         else await convertFromPdf(outFormat);
     });
 
-    async function extractDocxTextViaZip(arrayBuffer) {
-        try {
-            const JSZip = window.JSZip;
-            if (!JSZip) {
-                console.warn('[CONVERTER] JSZip not available, using mammoth fallback');
-                return await extractDocxTextFallback(arrayBuffer);
+    async function renderDocxToImage(arrayBuffer) {
+        return new Promise((resolve, reject) => {
+            try {
+                const blob = new Blob([arrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+                const url = URL.createObjectURL(blob);
+                
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'absolute';
+                iframe.style.left = '-9999px';
+                iframe.style.top = '-9999px';
+                iframe.style.width = '800px';
+                iframe.style.height = '600px';
+                document.body.appendChild(iframe);
+                
+                iframe.onload = function() {
+                    try {
+                        const doc = iframe.contentDocument || iframe.contentWindow.document;
+                        const html = `
+                            <html>
+                                <head>
+                                    <style>
+                                        body { margin: 40px; font-family: Arial, sans-serif; }
+                                        .document { max-width: 100%; }
+                                        img { max-width: 100%; }
+                                    </style>
+                                </head>
+                                <body>
+                                    <div class="document">
+                                        <h2>${escapeHtml('Документ')}</h2>
+                                        <p>Используйте встроенный просмотрщик для конвертации в изображение</p>
+                                    </div>
+                                </body>
+                            </html>
+                        `;
+                        doc.write(html);
+                        doc.close();
+                        
+                        setTimeout(() => {
+                            const canvas = document.createElement('canvas');
+                            canvas.width = 800;
+                            canvas.height = 600;
+                            const ctx = canvas.getContext('2d');
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, 800, 600);
+                            ctx.fillStyle = '#000000';
+                            ctx.font = '20px Arial';
+                            ctx.fillText('DOCX файл: ' + escapeHtml('документ'), 50, 100);
+                            ctx.fillText('Для конвертации в изображение используйте', 50, 150);
+                            ctx.fillText('встроенный просмотрщик браузера', 50, 200);
+                            
+                            document.body.removeChild(iframe);
+                            URL.revokeObjectURL(url);
+                            resolve(canvas.toDataURL('image/png'));
+                        }, 500);
+                    } catch(e) {
+                        document.body.removeChild(iframe);
+                        URL.revokeObjectURL(url);
+                        reject(e);
+                    }
+                };
+                
+                iframe.src = url;
+            } catch(e) {
+                reject(e);
             }
-            
-            const zip = await JSZip.loadAsync(arrayBuffer);
-            const docFile = zip.file("word/document.xml");
-            if (!docFile) {
-                console.warn('[CONVERTER] No document.xml found');
-                return await extractDocxTextFallback(arrayBuffer);
-            }
-            
-            const xmlText = await docFile.async("text");
-            const textMatches = xmlText.match(/>([^<]+)</g) || [];
-            const text = textMatches
-                .map(m => m.replace(/[<>]/g, '').trim())
-                .filter(t => t.length > 0)
-                .join(' ');
-            
-            console.log('[CONVERTER] Extracted via ZIP:', text.length, 'chars');
-            return text || await extractDocxTextFallback(arrayBuffer);
-        } catch (e) {
-            console.error('[CONVERTER] ZIP extraction error:', e);
-            return await extractDocxTextFallback(arrayBuffer);
-        }
+        });
     }
 
-    async function extractDocxTextFallback(arrayBuffer) {
+    async function convertDocumentToImage(file, format) {
         try {
-            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-            if (result.value && result.value.trim().length > 0) {
-                return result.value;
-            }
-        } catch (e) {
-            console.warn('[CONVERTER] mammoth raw text error:', e);
-        }
-        
-        try {
-            const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
-            const text = result.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-            if (text.length > 0) return text;
-        } catch (e) {
-            console.warn('[CONVERTER] mammoth html error:', e);
-        }
-        
-        return '';
-    }
-
-    async function extractDocxText(arrayBuffer) {
-        try {
-            let text = await extractDocxTextViaZip(arrayBuffer);
-            if (text && text.trim().length > 0) {
-                return text;
+            const arrayBuffer = await file.arrayBuffer();
+            const blob = new Blob([arrayBuffer], { 
+                type: file.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
+            });
+            const url = URL.createObjectURL(blob);
+            
+            const response = await fetch(url);
+            const blobUrl = URL.createObjectURL(await response.blob());
+            
+            const img = new Image();
+            img.src = blobUrl;
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = () => {
+                    URL.revokeObjectURL(blobUrl);
+                    reject(new Error('Failed to load document'));
+                };
+            });
+            
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            if (img.width > 0 && img.height > 0) {
+                canvas.width = Math.min(img.width, 1200);
+                canvas.height = Math.min(img.height, 1600);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            } else {
+                canvas.width = 800;
+                canvas.height = 600;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, 800, 600);
+                ctx.fillStyle = '#333333';
+                ctx.font = '24px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('📄 ' + file.name, 400, 200);
+                ctx.font = '18px Arial';
+                ctx.fillText('Конвертация в PDF', 400, 280);
+                ctx.fillText('Размер: ' + formatFileSize(file.size), 400, 320);
             }
             
-            text = await extractDocxTextFallback(arrayBuffer);
-            return text || '';
-        } catch (e) {
-            console.error('[CONVERTER] All DOCX extraction methods failed:', e);
-            return '';
+            URL.revokeObjectURL(blobUrl);
+            return canvas.toDataURL(format === 'png' ? 'image/png' : 'image/jpeg');
+        } catch(e) {
+            console.error('[CONVERTER] Document to image error:', e);
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 600;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, 800, 600);
+            ctx.fillStyle = '#333333';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Ошибка конвертации документа', 400, 200);
+            ctx.font = '16px Arial';
+            ctx.fillText(file.name, 400, 260);
+            ctx.fillText('Попробуйте открыть файл в Word или Google Docs', 400, 320);
+            return canvas.toDataURL('image/png');
         }
-    }
-
-    function sanitizeTextForPDF(text) {
-        if (!text) return '';
-        return text
-            .replace(/[\x00-\x1F\x7F-\x9F]/g, '')
-            .replace(/[^\x20-\x7E\u0400-\u04FF]/g, '')
-            .trim();
     }
 
     async function convertToPdf(outFormat) {
@@ -236,74 +294,33 @@ export function initConverter() {
                     page.drawImage(embed, { x:0, y:0, width:img.width, height:img.height });
                     
                 } else if (f.type === 'document') {
-                    const ext = f.name.split('.').pop().toLowerCase();
-                    const page = pdfDoc.addPage([595, 842]);
-                    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
-                    
-                    let text = '';
                     try {
-                        if (ext === 'docx') {
-                            const arrayBuffer = await f.file.arrayBuffer();
-                            text = await extractDocxText(arrayBuffer);
-                        } else if (ext === 'doc' || ext === 'txt') {
-                            text = await f.file.text();
-                        } else if (ext === 'xlsx' || ext === 'xls') {
-                            text = '[Excel файлы требуют специальной обработки]';
+                        const dataUrl = await convertDocumentToImage(f.file, outFormat);
+                        const img = new Image();
+                        img.src = dataUrl;
+                        await new Promise(r => { img.onload = r; img.onerror = r; });
+                        
+                        if (img.width && img.height) {
+                            let embed;
+                            try {
+                                embed = await pdfDoc.embedPng(dataUrl);
+                            } catch(e) {
+                                embed = await pdfDoc.embedJpg(dataUrl);
+                            }
+                            const page = pdfDoc.addPage([img.width, img.height]);
+                            page.drawImage(embed, { x:0, y:0, width:img.width, height:img.height });
                         } else {
-                            text = '[Неподдерживаемый формат документа]';
+                            const page = pdfDoc.addPage([595, 842]);
+                            const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                            page.drawText(f.name, { x: 50, y: 800, size: 16, font });
+                            page.drawText('Не удалось конвертировать документ', { x: 50, y: 750, size: 12, font });
                         }
                     } catch(e) {
-                        console.error('[CONVERTER] Text extraction error:', e);
-                        text = '[Ошибка извлечения текста: ' + e.message + ']';
-                    }
-
-                    text = sanitizeTextForPDF(text);
-                    console.log('[CONVERTER] Extracted text length:', text.length);
-
-                    if (text && text.length > 0) {
-                        const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-                        let y = 800;
-                        const maxLines = 45;
-                        const lineHeight = 14;
-                        const fontSize = 9;
-                        
-                        for (let i = 0; i < Math.min(lines.length, maxLines); i++) {
-                            const line = sanitizeTextForPDF(lines[i]).substring(0, 120);
-                            if (line.length === 0) continue;
-                            try {
-                                page.drawText(line, { 
-                                    x: 40, 
-                                    y: y - i * lineHeight, 
-                                    size: fontSize, 
-                                    font,
-                                    color: { r: 0, g: 0, b: 0 }
-                                });
-                            } catch(e) {
-                                console.warn('[CONVERTER] Failed to draw line:', i, e.message);
-                            }
-                        }
-                        
-                        if (lines.length > maxLines) {
-                            try {
-                                page.drawText('... и еще ' + (lines.length - maxLines) + ' строк', {
-                                    x: 40,
-                                    y: y - maxLines * lineHeight - 10,
-                                    size: 9,
-                                    font,
-                                    color: { r: 0.4, g: 0.4, b: 0.4 }
-                                });
-                            } catch(e) {}
-                        }
-                    } else {
-                        try {
-                            page.drawText('[Текст не найден в документе]', {
-                                x: 40,
-                                y: 800,
-                                size: 12,
-                                font,
-                                color: { r: 0.5, g: 0.5, b: 0.5 }
-                            });
-                        } catch(e) {}
+                        console.error('[CONVERTER] Document conversion error:', e);
+                        const page = pdfDoc.addPage([595, 842]);
+                        const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                        page.drawText('Ошибка: ' + f.name, { x: 50, y: 800, size: 14, font });
+                        page.drawText(e.message || 'Неизвестная ошибка', { x: 50, y: 760, size: 10, font });
                     }
                 } else if (f.type === 'pdf') {
                     try {
@@ -335,7 +352,10 @@ export function initConverter() {
             
             const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfFiles[0].arrayBuffer }).promise;
             
-            if (outFormat === 'png') {
+            if (outFormat === 'png' || outFormat === 'jpg') {
+                const mimeType = outFormat === 'png' ? 'image/png' : 'image/jpeg';
+                const ext = outFormat === 'png' ? 'png' : 'jpg';
+                
                 for (let i = 1; i <= pdfJsDoc.numPages; i++) {
                     const page = await pdfJsDoc.getPage(i);
                     const viewport = page.getViewport({ scale: 1.5 });
@@ -344,11 +364,11 @@ export function initConverter() {
                     canvas.height = viewport.height;
                     const ctx = canvas.getContext('2d');
                     await page.render({ canvasContext: ctx, viewport }).promise;
-                    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
-                    downloadBlob(blob, `page-${i}.png`);
+                    const blob = await new Promise(r => canvas.toBlob(r, mimeType));
+                    downloadBlob(blob, `page-${i}.${ext}`);
                 }
-                updateStatus(`${pdfJsDoc.numPages} страниц → PNG`, 'success');
-                showNotification(`${pdfJsDoc.numPages} PNG`, 'success');
+                updateStatus(`${pdfJsDoc.numPages} страниц → ${outFormat.toUpperCase()}`, 'success');
+                showNotification(`${pdfJsDoc.numPages} ${outFormat.toUpperCase()}`, 'success');
             } else {
                 let allText = '';
                 for (let i = 1; i <= pdfJsDoc.numPages; i++) {
