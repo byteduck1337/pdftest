@@ -24,7 +24,7 @@ export function initConverter() {
                         <option value="fromPdf">Из PDF</option>
                     </select>
                 </label>
-                <label id="outputFormatLabel">
+                <label id="outputFormatLabel" style="display:flex;align-items:center;gap:8px;">
                     Выходной формат:
                     <select id="outputFormatSelect">
                         <option value="png">PNG</option>
@@ -62,10 +62,11 @@ export function initConverter() {
         const mode = modeSelect.value;
         if (mode === 'toPdf') {
             formatLabel.style.display = 'none';
+            console.log('[CONVERTER] Output format hidden (mode: toPdf)');
         } else {
             formatLabel.style.display = 'flex';
+            console.log('[CONVERTER] Output format visible (mode:', mode, ')');
         }
-        console.log('[CONVERTER] Mode changed to:', mode, 'output format visible:', mode !== 'toPdf');
     }
 
     modeSelect.addEventListener('change', updateOutputFormatVisibility);
@@ -141,6 +142,7 @@ export function initConverter() {
         if (mode === 'auto') {
             const allPdf = files.every(f => f.type === 'pdf');
             targetMode = allPdf ? 'fromPdf' : 'toPdf';
+            console.log('[CONVERTER] Auto mode detected:', targetMode);
         }
         if (targetMode === 'toPdf') await convertToPdf(outFormat);
         else await convertFromPdf(outFormat);
