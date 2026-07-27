@@ -132,203 +132,144 @@ export function initConverter() {
         else await convertFromPdf(outFormat);
     });
 
-    async function convertDocumentToImage(file) {
-        return new Promise(async (resolve) => {
-            try {
-                const text = await file.text();
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                
-                canvas.width = 800;
-                canvas.height = 600;
-                
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                ctx.fillStyle = '#333333';
-                ctx.font = 'bold 24px Arial';
-                ctx.textAlign = 'left';
-                ctx.fillText('📄 ' + file.name, 40, 60);
-                
-                ctx.font = '16px Arial';
-                ctx.fillStyle = '#666666';
-                ctx.fillText('Размер: ' + formatFileSize(file.size), 40, 100);
-                
-                ctx.fillStyle = '#333333';
-                ctx.font = '14px Arial';
-                
-                const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-                const maxLines = Math.min(lines.length, 25);
-                let y = 150;
-                
-                for (let i = 0; i < maxLines; i++) {
-                    const line = lines[i].substring(0, 100);
-                    ctx.fillText(line, 40, y);
-                    y += 22;
+    async function extractTextFromDocx(arrayBuffer) {
+        let text = '';
+        
+        try {
+            if (window.JSZip) {
+                const zip = await window.JSZip.loadAsync(arrayBuffer);
+                const docFile = zip.file("word/document.xml");
+                if (docFile) {
+                    const xmlText = await docFile.async("text");
+                    const matches = xmlText.match(/>([^<]+)</g) || [];
+                    text = matches
+                        .map(m => m.replace(/[<>]/g, '').trim())
+                        .filter(t => t.length > 0)
+                        .join(' ');
+                    if (text.length > 10) {
+                        console.log('[CONVERTER] Extracted via JSZip:', text.length, 'chars');
+                        return text;
+                    }
                 }
-                
-                if (lines.length > 25) {
-                    ctx.fillStyle = '#999999';
-                    ctx.font = '12px Arial';
-                    ctx.fillText('... и еще ' + (lines.length - 25) + ' строк', 40, y + 10);
-                }
-                
-                if (lines.length === 0) {
-                    ctx.fillStyle = '#999999';
-                    ctx.font = '16px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('Текст не найден в документе', 400, 300);
-                }
-                
-                resolve(canvas.toDataURL('image/png'));
-            } catch (e) {
-                console.error('[CONVERTER] Document to image error:', e);
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = 800;
-                canvas.height = 600;
-                
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                ctx.fillStyle = '#333333';
-                ctx.font = 'bold 20px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('⚠️ Не удалось конвертировать документ', 400, 200);
-                
-                ctx.font = '16px Arial';
-                ctx.fillStyle = '#666666';
-                ctx.fillText(file.name, 400, 250);
-                
-                ctx.font = '14px Arial';
-                ctx.fillText('Ошибка: ' + e.message, 400, 300);
-                
-                resolve(canvas.toDataURL('image/png'));
             }
-        });
+        } catch(e) {
+            console.warn('[CONVERTER] JSZip failed:', e);
+        }
+
+        try {
+            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+            if (result.value && result.value.trim().length > 0) {
+                console.log('[CONVERTER] Extracted via mammoth raw:', result.value.length, 'chars');
+                return result.value;
+            }
+        } catch(e) {
+            console.warn('[CONVERTER] Mammoth raw failed:', e);
+        }
+
+        try {
+            const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+            const htmlText = result.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (htmlText.length > 0) {
+                console.log('[CONVERTER] Extracted via mammoth HTML:', htmlText.length, 'chars');
+                return htmlText;
+            }
+        } catch(e) {
+            console.warn('[CONVERTER] Mammoth HTML failed:', e);
+        }
+
+        return text || 'Текст не найден в документе';
     }
 
-    async function convertDocxToImage(arrayBuffer, fileName) {
-        return new Promise(async (resolve) => {
-            try {
-                let text = '';
-                
-                if (window.JSZip) {
-                    try {
-                        const zip = await window.JSZip.loadAsync(arrayBuffer);
-                        const docFile = zip.file("word/document.xml");
-                        if (docFile) {
-                            const xmlText = await docFile.async("text");
-                            const matches = xmlText.match(/>([^<]+)</g) || [];
-                            text = matches
-                                .map(m => m.replace(/[<>]/g, '').trim())
-                                .filter(t => t.length > 0)
-                                .join(' ');
-                        }
-                    } catch(e) {
-                        console.warn('[CONVERTER] JSZip extraction failed, using mammoth');
-                    }
-                }
-                
-                if (!text || text.length < 10) {
-                    try {
-                        const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-                        text = result.value || '';
-                    } catch(e) {
-                        console.warn('[CONVERTER] Mammoth extraction failed');
-                    }
-                }
-                
-                if (!text || text.length < 10) {
-                    try {
-                        const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
-                        text = result.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-                    } catch(e) {
-                        console.warn('[CONVERTER] Mammoth HTML conversion failed');
-                    }
-                }
-                
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = 800;
-                canvas.height = Math.min(600 + Math.floor(text.length / 500) * 100, 1600);
-                
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                ctx.fillStyle = '#333333';
-                ctx.font = 'bold 22px Arial';
-                ctx.textAlign = 'left';
-                ctx.fillText('📄 ' + fileName, 40, 50);
-                
-                ctx.font = '14px Arial';
-                ctx.fillStyle = '#666666';
-                ctx.fillText('Размер: ' + formatFileSize(arrayBuffer.byteLength), 40, 85);
-                
-                if (text && text.trim().length > 0) {
-                    const lines = text.split(/\s+/).filter(w => w.length > 0);
-                    const maxLines = Math.min(lines.length, 35);
-                    let y = 130;
-                    let currentLine = '';
-                    
-                    for (let i = 0; i < Math.min(lines.length, 35); i++) {
-                        const word = lines[i];
-                        if ((currentLine + ' ' + word).length > 80) {
-                            ctx.fillStyle = '#333333';
-                            ctx.font = '13px Arial';
-                            ctx.fillText(currentLine, 40, y);
-                            y += 20;
-                            currentLine = word;
-                        } else {
-                            currentLine = currentLine ? currentLine + ' ' + word : word;
-                        }
-                    }
-                    
-                    if (currentLine) {
-                        ctx.fillStyle = '#333333';
-                        ctx.font = '13px Arial';
-                        ctx.fillText(currentLine, 40, y);
-                        y += 20;
-                    }
-                    
-                    if (lines.length > 35) {
-                        ctx.fillStyle = '#999999';
-                        ctx.font = '12px Arial';
-                        ctx.fillText('... и еще ' + (lines.length - 35) + ' слов', 40, y + 10);
-                    }
+    async function renderDocxToCanvas(arrayBuffer, fileName) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        try {
+            const text = await extractTextFromDocx(arrayBuffer);
+            
+            const lines = text.split(/\s+/).filter(w => w.length > 0);
+            const maxLines = Math.min(lines.length, 40);
+            const lineHeight = 22;
+            const padding = 40;
+            const topOffset = 100;
+            
+            canvas.width = 800;
+            canvas.height = Math.min(topOffset + maxLines * lineHeight + 80, 1200);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#1a1a2e';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('📄 ' + fileName, padding, 50);
+            
+            ctx.font = '12px Arial';
+            ctx.fillStyle = '#666666';
+            ctx.fillText('Размер: ' + formatFileSize(arrayBuffer.byteLength), padding, 78);
+            
+            ctx.fillStyle = '#333333';
+            ctx.font = '14px Arial';
+            
+            let y = topOffset;
+            let currentLine = '';
+            
+            for (let i = 0; i < Math.min(lines.length, 40); i++) {
+                const word = lines[i];
+                if (currentLine.length === 0) {
+                    currentLine = word;
+                } else if ((currentLine + ' ' + word).length < 95) {
+                    currentLine += ' ' + word;
                 } else {
-                    ctx.fillStyle = '#999999';
-                    ctx.font = '16px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText('Текст не найден в документе', 400, 300);
-                    ctx.font = '14px Arial';
-                    ctx.fillText('Попробуйте открыть файл в Microsoft Word', 400, 340);
+                    ctx.fillText(currentLine, padding, y);
+                    y += lineHeight;
+                    currentLine = word;
                 }
-                
-                resolve(canvas.toDataURL('image/png'));
-            } catch(e) {
-                console.error('[CONVERTER] DOCX conversion error:', e);
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = 800;
-                canvas.height = 600;
-                
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                
-                ctx.fillStyle = '#333333';
-                ctx.font = 'bold 20px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('⚠️ Ошибка конвертации DOCX', 400, 200);
-                ctx.font = '16px Arial';
-                ctx.fillText(fileName, 400, 250);
-                ctx.font = '14px Arial';
-                ctx.fillStyle = '#666666';
-                ctx.fillText('Ошибка: ' + e.message, 400, 300);
-                
-                resolve(canvas.toDataURL('image/png'));
             }
-        });
+            
+            if (currentLine) {
+                ctx.fillText(currentLine, padding, y);
+                y += lineHeight;
+            }
+            
+            if (lines.length > 40) {
+                ctx.fillStyle = '#999999';
+                ctx.font = '12px Arial';
+                ctx.fillText('... и еще ' + (lines.length - 40) + ' слов', padding, y + 10);
+            }
+            
+            if (lines.length === 0 || text === 'Текст не найден в документе') {
+                ctx.fillStyle = '#999999';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('Текст не найден в документе', canvas.width/2, canvas.height/2);
+                ctx.font = '13px Arial';
+                ctx.fillText('Попробуйте открыть файл в Microsoft Word', canvas.width/2, canvas.height/2 + 40);
+            }
+            
+        } catch(e) {
+            console.error('[CONVERTER] Render error:', e);
+            canvas.width = 800;
+            canvas.height = 400;
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#cc0000';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('⚠️ Ошибка обработки документа', canvas.width/2, 160);
+            
+            ctx.fillStyle = '#333333';
+            ctx.font = '15px Arial';
+            ctx.fillText(fileName, canvas.width/2, 210);
+            
+            ctx.fillStyle = '#666666';
+            ctx.font = '13px Arial';
+            ctx.fillText('Ошибка: ' + e.message, canvas.width/2, 260);
+        }
+        
+        return canvas;
     }
 
     async function convertToPdf(outFormat) {
@@ -361,21 +302,59 @@ export function initConverter() {
                     page.drawImage(embed, { x:0, y:0, width:img.width, height:img.height });
                     
                 } else if (f.type === 'document') {
-                    let dataUrl;
                     const ext = f.name.split('.').pop().toLowerCase();
+                    let canvas;
                     
                     try {
                         if (ext === 'docx') {
                             const arrayBuffer = await f.file.arrayBuffer();
-                            dataUrl = await convertDocxToImage(arrayBuffer, f.name);
+                            canvas = await renderDocxToCanvas(arrayBuffer, f.name);
+                        } else if (ext === 'doc' || ext === 'txt') {
+                            const text = await f.file.text();
+                            canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            canvas.width = 800;
+                            const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+                            canvas.height = Math.min(100 + lines.length * 22, 1200);
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            ctx.fillStyle = '#1a1a2e';
+                            ctx.font = 'bold 18px Arial';
+                            ctx.fillText('📄 ' + f.name, 40, 50);
+                            ctx.font = '13px Arial';
+                            ctx.fillStyle = '#333333';
+                            let y = 100;
+                            for (let i = 0; i < Math.min(lines.length, 45); i++) {
+                                ctx.fillText(lines[i].substring(0, 100), 40, y);
+                                y += 22;
+                            }
                         } else {
-                            dataUrl = await convertDocumentToImage(f.file);
+                            canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            canvas.width = 800;
+                            canvas.height = 300;
+                            ctx.fillStyle = '#ffffff';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            ctx.fillStyle = '#999999';
+                            ctx.font = '18px Arial';
+                            ctx.textAlign = 'center';
+                            ctx.fillText('Формат не поддерживается: ' + ext, canvas.width/2, 150);
                         }
                     } catch(e) {
                         console.error('[CONVERTER] Document conversion error:', e);
-                        dataUrl = await createErrorImage(f.name, e.message);
+                        canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = 800;
+                        canvas.height = 300;
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = '#cc0000';
+                        ctx.font = '18px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('⚠️ Ошибка: ' + e.message, canvas.width/2, 150);
                     }
                     
+                    const dataUrl = canvas.toDataURL('image/png');
                     const img = new Image();
                     img.src = dataUrl;
                     await new Promise(r => { img.onload = r; img.onerror = r; });
@@ -389,10 +368,6 @@ export function initConverter() {
                         }
                         const page = pdfDoc.addPage([img.width, img.height]);
                         page.drawImage(embed, { x:0, y:0, width:img.width, height:img.height });
-                    } else {
-                        const page = pdfDoc.addPage([595, 842]);
-                        const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
-                        page.drawText('Ошибка конвертации: ' + f.name, { x: 50, y: 800, size: 16, font });
                     }
                 } else if (f.type === 'pdf') {
                     try {
@@ -414,35 +389,6 @@ export function initConverter() {
             updateStatus('Ошибка: ' + e.message, 'error');
             showNotification('Ошибка: ' + e.message, 'error');
         }
-    }
-
-    async function createErrorImage(fileName, errorMsg) {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = 800;
-        canvas.height = 400;
-        
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.fillStyle = '#cc0000';
-        ctx.font = 'bold 24px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('❌ Ошибка конвертации', 400, 120);
-        
-        ctx.fillStyle = '#333333';
-        ctx.font = '18px Arial';
-        ctx.fillText(fileName, 400, 180);
-        
-        ctx.fillStyle = '#666666';
-        ctx.font = '14px Arial';
-        ctx.fillText('Ошибка: ' + errorMsg, 400, 240);
-        
-        ctx.fillStyle = '#999999';
-        ctx.font = '12px Arial';
-        ctx.fillText('Попробуйте открыть файл в Microsoft Word', 400, 290);
-        
-        return canvas.toDataURL('image/png');
     }
 
     async function convertFromPdf(outFormat) {
