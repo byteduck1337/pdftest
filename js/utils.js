@@ -43,7 +43,7 @@ export function formatFileSize(b) {
 export function getFileType(name) {
     const ext = name.split('.').pop().toLowerCase();
     if (ext === 'pdf') return 'pdf';
-    if (['jpg','jpeg','png','gif','webp'].includes(ext)) return 'image';
-    if (['doc','docx','xls','xlsx','txt','odt'].includes(ext)) return 'document';
+    if (['jpg','jpeg','png','gif','webp','bmp','svg'].includes(ext)) return 'image';
+    if (['doc','docx','xls','xlsx','txt','odt','rtf'].includes(ext)) return 'document';
     return 'unknown';
 }
