@@ -1,128 +1,79 @@
 import { downloadBlob, readFileAsArrayBuffer, showNotification } from './utils.js';
 
-let pdfDoc = null;
-let pdfJsDoc = null;
-let currentPage = 1;
-let totalPages = 0;
-let scale = 1.5;
-let currentMode = 'edit';
-let selectedTextRange = null;
-let extractedItems = [];
-let renderTask = null;
-let isSelecting = false;
-let selectionStart = null;
-let canvas, ctx;
-let customFont = null;
-let currentPdfBytes = null;
-let isRendering = false;
-let renderTimeout = null;
+let pdfDoc = null, pdfJsDoc = null, currentPage = 1, totalPages = 0, scale = 1.4;
+let currentMode = 'edit', selectedTextRange = null, extractedItems = [];
+let renderTask = null, isSelecting = false, selectionStart = null;
+let canvas, ctx, customFont = null, currentPdfBytes = null;
 
 export function initPdfEditor() {
-    console.log('PDF Editor module initializing');
     const container = document.getElementById('edit');
-    if (!container) {
-        console.error('Container #edit not found');
-        return;
-    }
-    
+    if (!container) { console.error('[EDITOR] container not found'); return; }
+
     container.innerHTML = `
         <div class="tool-card">
-            <h3><i class="fas fa-pen-fancy"></i> Редактор PDF</h3>
-            
-            <div class="pdf-toolbar">
-                <div class="drop-zone" id="pdfDropZone" style="padding:20px; flex:1;">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                    <span>Перетащите PDF или <button class="btn btn-secondary btn-sm" id="selectPdfBtn" style="margin-left:10px;">Выбрать</button></span>
+            <h3><i class="fas fa-pen"></i> Редактор PDF</h3>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+                <div class="drop-zone" id="pdfDropZone" style="flex:1;padding:20px;display:flex;align-items:center;gap:12px;border:2px dashed var(--border);border-radius:var(--radius-sm);cursor:pointer;">
+                    <i class="fas fa-cloud-upload-alt" style="font-size:1.6rem;"></i>
+                    <span>Перетащите PDF или <strong>выберите</strong></span>
                     <input type="file" id="pdfInput" accept=".pdf" style="display:none;">
                 </div>
                 <button class="btn btn-primary" id="savePdfBtn"><i class="fas fa-save"></i> Сохранить</button>
-                <button class="btn btn-secondary" id="rotateCwBtn"><i class="fas fa-redo-alt"></i> Повернуть</button>
-                <button class="btn btn-secondary" id="extractTextBtn"><i class="fas fa-copy"></i> Извлечь текст</button>
+                <button class="btn btn-secondary" id="rotateBtn"><i class="fas fa-rotate-right"></i></button>
+                <button class="btn btn-secondary" id="extractBtn"><i class="fas fa-copy"></i> Текст</button>
             </div>
-            
             <div class="mode-selector">
-                <button class="mode-btn active" data-mode="edit"><i class="fas fa-pencil-alt"></i> Редактировать</button>
+                <button class="mode-btn active" data-mode="edit"><i class="fas fa-pencil"></i> Правка</button>
                 <button class="mode-btn" data-mode="add"><i class="fas fa-plus"></i> Добавить</button>
                 <button class="mode-btn" data-mode="delete"><i class="fas fa-eraser"></i> Удалить</button>
                 <button class="mode-btn" data-mode="watermark"><i class="fas fa-stamp"></i> Водяной знак</button>
             </div>
-            
             <div class="edit-controls">
-                <input type="text" id="editTextInput" placeholder="Введите текст..." style="flex:2;">
-                <select id="fontSelect">
-                    <option value="times">Times Roman</option>
-                    <option value="helvetica">Helvetica</option>
-                    <option value="courier">Courier</option>
-                </select>
-                <input type="number" id="fontSize" value="16" min="8" max="72" style="max-width:70px;">
-                <select id="fontColor">
-                    <option value="black">Черный</option>
-                    <option value="red">Красный</option>
-                    <option value="blue">Синий</option>
-                    <option value="green">Зеленый</option>
-                </select>
+                <input type="text" id="editTextInput" placeholder="Текст..." style="flex:2;">
+                <select id="fontSelect"><option value="times">Times</option><option value="helvetica">Helvetica</option><option value="courier">Courier</option></select>
+                <input type="number" id="fontSize" value="14" min="8" max="72" style="max-width:70px;">
+                <select id="fontColor"><option value="black">Черный</option><option value="red">Красный</option><option value="blue">Синий</option></select>
                 <button class="btn btn-primary btn-sm" id="applyEditBtn"><i class="fas fa-check"></i> Применить</button>
             </div>
-            
-            <div class="canvas-container" style="position:relative;">
-                <canvas id="pdfCanvas"></canvas>
-                <div id="selectionBox" style="position:absolute; border:2px dashed var(--primary); pointer-events:none; display:none; border-radius:4px; background:rgba(108,92,231,0.05);"></div>
+            <div class="canvas-container"><canvas id="pdfCanvas"></canvas></div>
+            <div style="display:flex;justify-content:center;gap:16px;margin:12px 0;">
+                <button class="btn btn-secondary btn-sm" id="prevPage"><i class="fas fa-chevron-left"></i></button>
+                <span id="pageInfo" style="color:var(--text-secondary);font-weight:500;">0 / 0</span>
+                <button class="btn btn-secondary btn-sm" id="nextPage"><i class="fas fa-chevron-right"></i></button>
             </div>
-            
-            <div style="display:flex; justify-content:center; gap:16px; margin:16px 0; align-items:center;">
-                <button class="btn btn-secondary btn-sm" id="prevPageBtn"><i class="fas fa-chevron-left"></i></button>
-                <span id="pageInfo" style="color:var(--text-secondary); font-weight:500;">Страница 0 / 0</span>
-                <button class="btn btn-secondary btn-sm" id="nextPageBtn"><i class="fas fa-chevron-right"></i></button>
-            </div>
-            
-            <div id="statusArea" class="status">
-                <i class="fas fa-info-circle"></i> Загрузите PDF для начала работы
-            </div>
-            
-            <div id="extractedTextPanel" style="display:none; margin-top:16px;">
-                <h4 style="color:var(--text-secondary); margin-bottom:12px;"><i class="fas fa-copy"></i> Извлечённый текст</h4>
-                <pre id="extractedTextContent" style="background:rgba(0,0,0,0.3); padding:16px; border-radius:8px; max-height:200px; overflow:auto; color:var(--text-secondary); font-family:'Inter',monospace; font-size:0.9rem; white-space:pre-wrap;"></pre>
-                <div class="btn-group" style="margin-top:12px;">
-                    <button class="btn btn-secondary btn-sm" id="copyExtractedBtn"><i class="fas fa-copy"></i> Копировать</button>
-                    <button class="btn btn-secondary btn-sm" id="closeExtractedBtn">Закрыть</button>
-                </div>
+            <div id="statusArea" class="status"><i class="fas fa-info-circle"></i> Загрузите PDF</div>
+            <div id="extractedTextPanel" style="display:none;margin-top:16px;">
+                <h4 style="font-weight:500;margin-bottom:8px;"><i class="fas fa-copy"></i> Текст</h4>
+                <pre id="extractedTextContent"></pre>
+                <button class="btn btn-secondary btn-sm" id="closeExtracted" style="margin-top:8px;">Закрыть</button>
             </div>
         </div>
     `;
 
     canvas = document.getElementById('pdfCanvas');
     ctx = canvas.getContext('2d');
-
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    const selectBtn = document.getElementById('selectPdfBtn');
-    const fileInput = document.getElementById('pdfInput');
-    const dropZone = document.getElementById('pdfDropZone');
+    const drop = document.getElementById('pdfDropZone');
+    const input = document.getElementById('pdfInput');
     const saveBtn = document.getElementById('savePdfBtn');
-    const rotateBtn = document.getElementById('rotateCwBtn');
-    const extractBtn = document.getElementById('extractTextBtn');
-    const prevBtn = document.getElementById('prevPageBtn');
-    const nextBtn = document.getElementById('nextPageBtn');
+    const rotateBtn = document.getElementById('rotateBtn');
+    const extractBtn = document.getElementById('extractBtn');
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
     const applyBtn = document.getElementById('applyEditBtn');
     const editInput = document.getElementById('editTextInput');
 
-    if (!canvas || !selectBtn || !fileInput || !dropZone) {
-        console.error('PDF Editor elements not found');
-        return;
-    }
+    if (!canvas || !drop || !input) { console.error('[EDITOR] missing elements'); return; }
 
-    console.log('PDF Editor elements found');
-
-    selectBtn.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', e => e.preventDefault());
-    dropZone.addEventListener('drop', e => {
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('dragover', e => e.preventDefault());
+    drop.addEventListener('drop', e => {
         e.preventDefault();
         const file = e.dataTransfer.files[0];
         if (file?.type === 'application/pdf') loadPdf(file);
     });
-    fileInput.addEventListener('change', e => {
-        if (e.target.files[0]) loadPdf(e.target.files[0]);
-    });
+    input.addEventListener('change', e => { if (e.target.files[0]) loadPdf(e.target.files[0]); });
 
     saveBtn.addEventListener('click', savePdf);
     rotateBtn.addEventListener('click', rotatePage);
@@ -130,21 +81,14 @@ export function initPdfEditor() {
     prevBtn.addEventListener('click', () => changePage(-1));
     nextBtn.addEventListener('click', () => changePage(1));
     applyBtn.addEventListener('click', applyEdit);
+    editInput.addEventListener('keypress', e => { if (e.key === 'Enter') applyEdit(); });
 
-    editInput.addEventListener('keypress', e => {
-        if (e.key === 'Enter') {
-            applyEdit();
-            e.preventDefault();
-        }
-    });
-
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentMode = btn.dataset.mode;
+    document.querySelectorAll('.mode-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+            currentMode = b.dataset.mode;
             updateStatus();
-            clearSelection();
         });
     });
 
@@ -152,493 +96,244 @@ export function initPdfEditor() {
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseup', onMouseUp);
     canvas.addEventListener('click', onCanvasClick);
-
-    document.getElementById('copyExtractedBtn').addEventListener('click', () => {
-        const text = document.getElementById('extractedTextContent').textContent;
-        navigator.clipboard.writeText(text).then(() => showNotification('Текст скопирован', 'success'));
-    });
-    document.getElementById('closeExtractedBtn').addEventListener('click', () => {
+    document.getElementById('closeExtracted').addEventListener('click', () => {
         document.getElementById('extractedTextPanel').style.display = 'none';
     });
 
     async function loadCyrillicFont() {
         try {
             const fontUrl = 'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf';
-            const fontBytes = await fetch(fontUrl).then(res => res.arrayBuffer());
+            const bytes = await fetch(fontUrl).then(r => r.arrayBuffer());
             pdfDoc.registerFontkit(window.fontkit);
-            customFont = await pdfDoc.embedFont(fontBytes);
-            console.log('Cyrillic font loaded');
-        } catch (e) {
-            console.warn('Failed to load Roboto:', e);
-        }
+            customFont = await pdfDoc.embedFont(bytes);
+        } catch(e) { console.warn('[EDITOR] font load skipped'); }
     }
 
     async function loadPdf(file) {
-        console.log('Loading PDF:', file.name);
         try {
-            const arrayBuffer = await readFileAsArrayBuffer(file);
-            currentPdfBytes = arrayBuffer;
-            pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            const buf = await readFileAsArrayBuffer(file);
+            currentPdfBytes = buf;
+            pdfDoc = await PDFLib.PDFDocument.load(buf);
             await loadCyrillicFont();
-            pdfJsDoc = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+            pdfJsDoc = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
             totalPages = pdfJsDoc.numPages;
             currentPage = 1;
             await renderPage();
-            updatePageInfo();
-            updateStatus(`PDF "${file.name}" загружен (${totalPages} страниц)`);
-            showNotification(`PDF "${file.name}" загружен`, 'success');
-        } catch (err) {
-            console.error('Load PDF error:', err);
-            showNotification('Ошибка загрузки PDF: ' + err.message, 'error');
-            updateStatus('Ошибка загрузки: ' + err.message, 'error');
-        }
+            document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`;
+            updateStatus(`PDF загружен: ${file.name}`);
+            showNotification('PDF загружен', 'success');
+        } catch(e) { console.error('[EDITOR] load error:', e); showNotification('Ошибка: '+e.message,'error'); }
     }
 
     async function renderPage() {
         if (!pdfJsDoc) return;
-        if (isRendering) return;
-        
-        isRendering = true;
-        
-        if (renderTask) {
-            try { 
-                await renderTask.cancel(); 
-            } catch(e) {}
-            renderTask = null;
-        }
-        
+        if (renderTask) { try { await renderTask.cancel(); } catch(e) {} renderTask = null; }
         try {
             const page = await pdfJsDoc.getPage(currentPage);
             const viewport = page.getViewport({ scale });
-            
-            if (canvas.width !== viewport.width || canvas.height !== viewport.height) {
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
-            }
-            
+            canvas.width = viewport.width; canvas.height = viewport.height;
             const renderContext = { canvasContext: ctx, viewport };
             renderTask = page.render(renderContext);
             await renderTask.promise;
             renderTask = null;
-
-            const textContent = await page.getTextContent();
-            extractedItems = textContent.items.map(item => {
+            const content = await page.getTextContent();
+            extractedItems = content.items.map(item => {
                 const tx = item.transform;
-                const x = tx[4] * scale;
-                const y = canvas.height - (tx[5] * scale);
-                const width = item.width * scale;
-                const height = (item.height || Math.abs(tx[0]) * 1.2) * scale;
                 return {
                     text: item.str,
-                    x, y, width, height,
-                    original: item,
+                    x: tx[4] * scale,
+                    y: canvas.height - (tx[5] * scale),
+                    width: item.width * scale,
+                    height: (item.height || Math.abs(tx[0]) * 1.2) * scale,
                     pdfX: tx[4],
                     pdfY: tx[5],
                     fontSize: Math.abs(tx[0])
                 };
             });
-            
-            if (selectedTextRange) {
-                highlightSelection(selectedTextRange);
-            }
-            
-        } catch (err) {
-            if (err.name !== 'RenderingCancelledException') {
-                console.warn('Render error:', err);
-            }
-        } finally {
-            isRendering = false;
-        }
+        } catch(e) { console.warn('[EDITOR] render error:', e); }
     }
 
-    function updatePageInfo() {
-        document.getElementById('pageInfo').textContent = `Страница ${currentPage} / ${totalPages}`;
-    }
-
-    async function changePage(delta) {
-        const newPage = currentPage + delta;
-        if (newPage >= 1 && newPage <= totalPages) {
-            currentPage = newPage;
-            selectedTextRange = null;
-            await renderPage();
-            updatePageInfo();
-            updateStatus();
-        }
+    function changePage(delta) {
+        const np = currentPage + delta;
+        if (np >= 1 && np <= totalPages) { currentPage = np; renderPage(); document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`; }
     }
 
     function onMouseDown(e) {
         if (currentMode !== 'edit') return;
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        selectionStart = {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY
-        };
+        const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+        selectionStart = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
         isSelecting = true;
-        document.getElementById('selectionBox').style.display = 'none';
     }
-
     function onMouseMove(e) {
         if (!isSelecting) return;
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const currentX = (e.clientX - rect.left) * scaleX;
-        const currentY = (e.clientY - rect.top) * scaleY;
-
-        const box = document.getElementById('selectionBox');
-        const left = Math.min(selectionStart.x, currentX);
-        const top = Math.min(selectionStart.y, currentY);
-        const width = Math.abs(currentX - selectionStart.x);
-        const height = Math.abs(currentY - selectionStart.y);
-
-        box.style.display = 'block';
-        box.style.left = left + 'px';
-        box.style.top = top + 'px';
-        box.style.width = width + 'px';
-        box.style.height = height + 'px';
+        const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+        const cx = (e.clientX - rect.left) * sx, cy = (e.clientY - rect.top) * sy;
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        renderPage().then(() => {
+            ctx.strokeStyle = '#2d3c7a';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5,5]);
+            ctx.strokeRect(Math.min(selectionStart.x,cx), Math.min(selectionStart.y,cy), Math.abs(cx-selectionStart.x), Math.abs(cy-selectionStart.y));
+            ctx.setLineDash([]);
+        });
     }
-
     function onMouseUp(e) {
-        if (!isSelecting) return;
+        if (!isSelecting || !selectionStart) return;
         isSelecting = false;
-        const box = document.getElementById('selectionBox');
-        box.style.display = 'none';
-
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const end = {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY
-        };
-
+        const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+        const end = { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
         const selected = findTextInArea(selectionStart, end);
         if (selected) {
             selectedTextRange = selected;
-            const input = document.getElementById('editTextInput');
-            input.value = selected.text;
-            input.focus();
-            input.select();
-            updateStatus(`Выделено: "${selected.text.substring(0, 40)}${selected.text.length > 40 ? '...' : ''}"`);
-            renderPage();
-        } else {
-            updateStatus('Текст не найден в выделенной области');
-        }
+            editInput.value = selected.text;
+            editInput.focus();
+            updateStatus(`Выделено: "${selected.text.substring(0,40)}${selected.text.length>40?'...':''}"`);
+            highlightSelection(selected);
+        } else { updateStatus('Текст не найден'); }
     }
-
     function findTextInArea(p1, p2) {
-        const minX = Math.min(p1.x, p2.x);
-        const maxX = Math.max(p1.x, p2.x);
-        const minY = Math.min(p1.y, p2.y);
-        const maxY = Math.max(p1.y, p2.y);
-
-        const items = extractedItems.filter(item => {
-            return item.x < maxX + 5 && (item.x + item.width) > minX - 5 &&
-                   item.y < maxY + 5 && (item.y + item.height) > minY - 5;
-        });
-        if (items.length === 0) return null;
-
-        items.sort((a, b) => b.y - a.y || a.x - b.x);
-        const text = items.map(i => i.text).join(' ');
-        return { text, items, bounds: { minX, maxX, minY, maxY } };
+        const minX = Math.min(p1.x,p2.x), maxX = Math.max(p1.x,p2.x);
+        const minY = Math.min(p1.y,p2.y), maxY = Math.max(p1.y,p2.y);
+        const items = extractedItems.filter(i => i.x < maxX+5 && i.x+i.width > minX-5 && i.y < maxY+5 && i.y+i.height > minY-5);
+        if (!items.length) return null;
+        items.sort((a,b) => b.y - a.y || a.x - b.x);
+        return { text: items.map(i => i.text).join(' '), items, bounds: { minX, maxX, minY, maxY } };
     }
-
-    function highlightSelection(selected) {
-        if (!selected || !selected.bounds) return;
+    function highlightSelection(sel) {
         ctx.save();
-        ctx.strokeStyle = '#6C5CE7';
+        ctx.strokeStyle = '#2d3c7a';
         ctx.lineWidth = 2;
-        ctx.setLineDash([6, 4]);
-        ctx.strokeRect(
-            selected.bounds.minX - 2,
-            selected.bounds.minY - 2,
-            selected.bounds.maxX - selected.bounds.minX + 4,
-            selected.bounds.maxY - selected.bounds.minY + 4
-        );
+        ctx.setLineDash([4,4]);
+        ctx.strokeRect(sel.bounds.minX-2, sel.bounds.minY-2, sel.bounds.maxX-sel.bounds.minX+4, sel.bounds.maxY-sel.bounds.minY+4);
         ctx.restore();
     }
 
-    function clearSelection() {
-        selectedTextRange = null;
-        document.getElementById('selectionBox').style.display = 'none';
-        if (pdfJsDoc && !isRendering) {
-            renderPage();
-        }
-    }
-
     async function onCanvasClick(e) {
-        if (!pdfDoc) {
-            showNotification('Сначала загрузите PDF', 'warning');
-            return;
-        }
+        if (!pdfDoc) { showNotification('Загрузите PDF','warning'); return; }
         const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const clickX = (e.clientX - rect.left) * scaleX;
-        const clickY = (e.clientY - rect.top) * scaleY;
-
-        if (currentMode === 'add') {
-            await addTextAt(clickX, clickY);
-        } else if (currentMode === 'delete') {
-            await deleteTextAt(clickX, clickY);
-        } else if (currentMode === 'watermark') {
-            await addWatermarkDialog();
-        }
-    }
-
-    async function applyEdit() {
-        if (currentMode === 'edit' && selectedTextRange) {
-            await replaceText();
-        } else if (currentMode === 'edit') {
-            showNotification('Сначала выделите текст', 'warning');
-        } else if (currentMode === 'add') {
-            showNotification('Кликните на страницу, чтобы добавить текст', 'info');
-        }
+        const sx = canvas.width / rect.width, sy = canvas.height / rect.height;
+        const cx = (e.clientX - rect.left) * sx, cy = (e.clientY - rect.top) * sy;
+        if (currentMode === 'add') await addTextAt(cx, cy);
+        else if (currentMode === 'delete') await deleteTextAt(cx, cy);
+        else if (currentMode === 'watermark') await addWatermark();
     }
 
     async function getFont() {
-        const fontSelect = document.getElementById('fontSelect').value;
-        if (customFont && fontSelect !== 'helvetica' && fontSelect !== 'courier') {
-            return customFont;
-        }
-        if (fontSelect === 'times') return await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
-        if (fontSelect === 'courier') return await pdfDoc.embedFont(PDFLib.StandardFonts.Courier);
+        const sel = document.getElementById('fontSelect').value;
+        if (customFont && sel !== 'helvetica' && sel !== 'courier') return customFont;
+        if (sel === 'times') return await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
+        if (sel === 'courier') return await pdfDoc.embedFont(PDFLib.StandardFonts.Courier);
         return await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
     }
 
+    async function applyEdit() {
+        if (currentMode === 'edit' && selectedTextRange) await replaceText();
+        else if (currentMode === 'edit') showNotification('Выделите текст', 'warning');
+        else if (currentMode === 'add') showNotification('Кликните на страницу', 'info');
+    }
     async function replaceText() {
         const newText = document.getElementById('editTextInput').value.trim();
-        if (!newText) {
-            showNotification('Введите новый текст', 'warning');
-            return;
-        }
-
+        if (!newText) { showNotification('Введите текст','warning'); return; }
         try {
-            const pages = pdfDoc.getPages();
-            const page = pages[currentPage - 1];
-
+            const page = pdfDoc.getPages()[currentPage-1];
             const font = await getFont();
-            const fontSize = parseInt(document.getElementById('fontSize').value);
-            const colorName = document.getElementById('fontColor').value;
-            const color = {
-                black: { r: 0, g: 0, b: 0 },
-                red: { r: 1, g: 0, b: 0 },
-                blue: { r: 0, g: 0, b: 1 },
-                green: { r: 0, g: 1, b: 0 }
-            }[colorName] || { r: 0, g: 0, b: 0 };
-
+            const size = parseInt(document.getElementById('fontSize').value);
+            const color = { black:{r:0,g:0,b:0}, red:{r:1,g:0,b:0}, blue:{r:0,g:0,b:1} }[document.getElementById('fontColor').value] || {r:0,g:0,b:0};
             const items = selectedTextRange.items;
-            const minPdfX = Math.min(...items.map(i => i.pdfX));
-            const maxPdfX = Math.max(...items.map(i => i.pdfX + i.width / scale));
-            const minPdfY = Math.min(...items.map(i => i.pdfY));
-            const maxPdfY = Math.max(...items.map(i => i.pdfY + i.fontSize));
-
-            const padding = 2;
-            page.drawRectangle({
-                x: minPdfX - padding,
-                y: minPdfY - padding,
-                width: (maxPdfX - minPdfX) + 2 * padding,
-                height: (maxPdfY - minPdfY) + 2 * padding,
-                color: { r: 1, g: 1, b: 1 }
-            });
-
-            const firstItem = items[0];
-            page.drawText(newText, {
-                x: firstItem.pdfX,
-                y: firstItem.pdfY,
-                size: fontSize,
-                font,
-                color
-            });
-
+            const minX = Math.min(...items.map(i=>i.pdfX));
+            const maxX = Math.max(...items.map(i=>i.pdfX + i.width/scale));
+            const minY = Math.min(...items.map(i=>i.pdfY));
+            const maxY = Math.max(...items.map(i=>i.pdfY + i.fontSize));
+            page.drawRectangle({ x: minX-2, y: minY-2, width: maxX-minX+4, height: maxY-minY+4, color: {r:1,g:1,b:1} });
+            page.drawText(newText, { x: items[0].pdfX, y: items[0].pdfY, size, font, color });
             await saveAndReload();
-            showNotification('Текст заменён', 'success');
-            updateStatus('Текст успешно заменён');
-            clearSelection();
-        } catch (error) {
-            console.error('Replace text error:', error);
-            showNotification('Ошибка: ' + error.message, 'error');
-        }
+            showNotification('Текст заменён','success');
+            selectedTextRange = null;
+        } catch(e) { console.error('[EDITOR] replace error:', e); showNotification('Ошибка: '+e.message,'error'); }
     }
-
-    async function addTextAt(x, y) {
+    async function addTextAt(x,y) {
         const text = document.getElementById('editTextInput').value.trim();
-        if (!text) {
-            showNotification('Введите текст в поле', 'warning');
-            return;
-        }
-
+        if (!text) { showNotification('Введите текст','warning'); return; }
         try {
-            const pages = pdfDoc.getPages();
-            const page = pages[currentPage - 1];
+            const page = pdfDoc.getPages()[currentPage-1];
             const { height } = page.getSize();
-
-            const pdfX = x / scale;
-            const pdfY = height - (y / scale);
-
             const font = await getFont();
-            const fontSize = parseInt(document.getElementById('fontSize').value);
-            const colorName = document.getElementById('fontColor').value;
-            const color = {
-                black: { r: 0, g: 0, b: 0 },
-                red: { r: 1, g: 0, b: 0 },
-                blue: { r: 0, g: 0, b: 1 },
-                green: { r: 0, g: 1, b: 0 }
-            }[colorName] || { r: 0, g: 0, b: 0 };
-
-            page.drawText(text, {
-                x: pdfX,
-                y: pdfY - fontSize,
-                size: fontSize,
-                font,
-                color
-            });
-
+            const size = parseInt(document.getElementById('fontSize').value);
+            const color = { black:{r:0,g:0,b:0}, red:{r:1,g:0,b:0}, blue:{r:0,g:0,b:1} }[document.getElementById('fontColor').value] || {r:0,g:0,b:0};
+            page.drawText(text, { x: x/scale, y: height - (y/scale) - size, size, font, color });
             await saveAndReload();
-            showNotification('Текст добавлен', 'success');
-            updateStatus(`Текст "${text}" добавлен`);
-        } catch (error) {
-            console.error('Add text error:', error);
-            showNotification('Ошибка: ' + error.message, 'error');
-        }
+            showNotification('Текст добавлен','success');
+        } catch(e) { console.error('[EDITOR] add error:', e); showNotification('Ошибка: '+e.message,'error'); }
     }
-
-    async function deleteTextAt(x, y) {
-        const item = extractedItems.find(i =>
-            x >= i.x - 5 && x <= i.x + i.width + 5 &&
-            y >= i.y - 5 && y <= i.y + i.height + 5
-        );
-        if (!item) {
-            showNotification('Текст не найден. Кликните точно по тексту', 'warning');
-            return;
-        }
-
+    async function deleteTextAt(x,y) {
+        const item = extractedItems.find(i => x >= i.x-5 && x <= i.x+i.width+5 && y >= i.y-5 && y <= i.y+i.height+5);
+        if (!item) { showNotification('Кликните по тексту','warning'); return; }
         try {
-            const pages = pdfDoc.getPages();
-            const page = pages[currentPage - 1];
-
-            const pdfX = item.pdfX;
-            const pdfY = item.pdfY;
-            const width = item.width / scale;
-            const heightRect = item.height / scale;
-
-            page.drawRectangle({
-                x: pdfX - 2,
-                y: pdfY - 2,
-                width: width + 4,
-                height: heightRect + 4,
-                color: { r: 1, g: 1, b: 1 }
-            });
-
+            const page = pdfDoc.getPages()[currentPage-1];
+            page.drawRectangle({ x: item.pdfX-2, y: item.pdfY-2, width: item.width/scale+4, height: item.height/scale+4, color: {r:1,g:1,b:1} });
             await saveAndReload();
-            showNotification(`Текст "${item.text}" удалён`, 'success');
-            updateStatus('Текст удалён');
-        } catch (error) {
-            console.error('Delete text error:', error);
-            showNotification('Ошибка: ' + error.message, 'error');
-        }
+            showNotification(`Удалено: "${item.text}"`,'success');
+        } catch(e) { console.error('[EDITOR] delete error:', e); showNotification('Ошибка: '+e.message,'error'); }
     }
-
-    async function addWatermarkDialog() {
-        const text = prompt('Введите текст водяного знака:', 'КОНФИДЕНЦИАЛЬНО');
+    async function addWatermark() {
+        const text = prompt('Водяной знак:', 'КОНФИДЕНЦИАЛЬНО');
         if (!text) return;
-
         try {
-            const pages = pdfDoc.getPages();
-            const page = pages[currentPage - 1];
+            const page = pdfDoc.getPages()[currentPage-1];
             const { width, height } = page.getSize();
             const font = await getFont();
-
-            page.drawText(text, {
-                x: width / 2 - 100,
-                y: height / 2,
-                size: 60,
-                font,
-                color: { r: 0.7, g: 0.7, b: 0.7 },
-                opacity: 0.25,
-                rotate: { angle: 45, type: 'degrees' }
-            });
-
+            page.drawText(text, { x: width/2-120, y: height/2-20, size: 50, font, color: {r:0.6,g:0.6,b:0.6}, opacity:0.25, rotate: { angle: -30, type:'degrees' } });
             await saveAndReload();
-            showNotification('Водяной знак добавлен', 'success');
-            updateStatus('Водяной знак добавлен');
-        } catch (error) {
-            console.error('Watermark error:', error);
-            showNotification('Ошибка: ' + error.message, 'error');
-        }
+            showNotification('Водяной знак добавлен','success');
+        } catch(e) { console.error('[EDITOR] watermark error:', e); showNotification('Ошибка: '+e.message,'error'); }
     }
-
     async function rotatePage() {
         if (!pdfDoc) return;
         try {
-            const pages = pdfDoc.getPages();
-            const page = pages[currentPage - 1];
-            const rotation = page.getRotation();
-            page.setRotation({ angle: (rotation.angle + 90) % 360 });
+            const page = pdfDoc.getPages()[currentPage-1];
+            page.setRotation({ angle: (page.getRotation().angle + 90) % 360 });
             await saveAndReload();
-            showNotification('Страница повёрнута на 90°', 'success');
-        } catch (error) {
-            console.error('Rotate error:', error);
-            showNotification('Ошибка: ' + error.message, 'error');
-        }
+            showNotification('Поворот 90°','success');
+        } catch(e) { console.error('[EDITOR] rotate error:', e); showNotification('Ошибка: '+e.message,'error'); }
     }
-
     async function saveAndReload() {
-        const pdfBytes = await pdfDoc.save();
-        currentPdfBytes = pdfBytes;
-        pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+        const bytes = await pdfDoc.save();
+        currentPdfBytes = bytes;
+        pdfDoc = await PDFLib.PDFDocument.load(bytes);
         await loadCyrillicFont();
-        pdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+        pdfJsDoc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
         totalPages = pdfJsDoc.numPages;
-        selectedTextRange = null;
         await renderPage();
-        updatePageInfo();
+        document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`;
     }
-
     async function savePdf() {
-        if (!pdfDoc) {
-            showNotification('Нет загруженного PDF', 'warning');
-            return;
-        }
-        const pdfBytes = await pdfDoc.save();
-        downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), 'edited.pdf');
-        showNotification('PDF сохранён', 'success');
-        updateStatus('PDF сохранён');
+        if (!pdfDoc) { showNotification('Нет PDF','warning'); return; }
+        const bytes = await pdfDoc.save();
+        downloadBlob(new Blob([bytes], {type:'application/pdf'}), 'edited.pdf');
+        showNotification('PDF сохранён','success');
     }
-
     async function extractAndShowText() {
-        if (!pdfJsDoc) {
-            showNotification('Сначала загрузите PDF', 'warning');
-            return;
-        }
-        let allText = '';
-        for (let i = 1; i <= pdfJsDoc.numPages; i++) {
+        if (!pdfJsDoc) { showNotification('Загрузите PDF','warning'); return; }
+        let all = '';
+        for (let i=1; i<=pdfJsDoc.numPages; i++) {
             const page = await pdfJsDoc.getPage(i);
             const content = await page.getTextContent();
-            allText += content.items.map(item => item.str).join(' ') + '\n\n';
+            all += content.items.map(t => t.str).join(' ') + '\n\n';
         }
-        document.getElementById('extractedTextContent').textContent = allText;
+        document.getElementById('extractedTextContent').textContent = all;
         document.getElementById('extractedTextPanel').style.display = 'block';
-        updateStatus(`Извлечено ${pdfJsDoc.numPages} страниц текста`);
+        updateStatus(`Извлечено ${pdfJsDoc.numPages} страниц`);
     }
-
-    function updateStatus(message) {
-        const statusEl = document.getElementById('statusArea');
-        if (message) {
-            statusEl.innerHTML = `<i class="fas fa-info-circle"></i> ${message}`;
-        } else {
-            const descriptions = {
-                edit: 'Режим редактирования: выделите текст мышью, измените и нажмите Enter',
-                add: 'Режим добавления: введите текст и кликните на страницу',
-                delete: 'Режим удаления: кликните по тексту для удаления',
-                watermark: 'Режим водяного знака: кликните для добавления'
-            };
-            statusEl.innerHTML = `<i class="fas fa-info-circle"></i> ${descriptions[currentMode] || 'Выберите режим'}`;
+    function updateStatus(msg) {
+        const el = document.getElementById('statusArea');
+        if (msg) el.innerHTML = `<i class="fas fa-info-circle"></i> ${msg}`;
+        else {
+            const desc = { edit:'Выделите текст → измените → Enter', add:'Введите текст → кликните на страницу', delete:'Кликните по тексту для удаления', watermark:'Кликните для добавления' };
+            el.innerHTML = `<i class="fas fa-info-circle"></i> ${desc[currentMode] || 'Режим'}`;
         }
     }
-
-    updateStatus('Загрузите PDF файл для начала работы');
-    console.log('PDF Editor module initialized');
+    updateStatus('Загрузите PDF');
 }
