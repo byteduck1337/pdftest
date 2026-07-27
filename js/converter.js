@@ -17,19 +17,19 @@ export function initConverter() {
             </div>
             <div class="options-panel">
                 <label>Входной формат: <span id="inputFormatLabel" style="font-weight:400;color:var(--text);">авто</span></label>
-                <label>Выходной формат:
-                    <select id="outputFormatSelect">
-                        <option value="pdf">PDF</option>
-                        <option value="png">PNG</option>
-                        <option value="jpg">JPG</option>
-                        <option value="txt">TXT</option>
-                    </select>
-                </label>
                 <label>Режим:
                     <select id="convertMode">
                         <option value="auto">Авто</option>
                         <option value="toPdf">В PDF</option>
                         <option value="fromPdf">Из PDF</option>
+                    </select>
+                </label>
+                <label id="outputFormatLabel">
+                    Выходной формат:
+                    <select id="outputFormatSelect">
+                        <option value="png">PNG</option>
+                        <option value="jpg">JPG</option>
+                        <option value="txt">TXT</option>
                     </select>
                 </label>
             </div>
@@ -49,6 +49,7 @@ export function initConverter() {
     const clearBtn = document.getElementById('clearConvertBtn');
     const modeSelect = document.getElementById('convertMode');
     const formatSelect = document.getElementById('outputFormatSelect');
+    const formatLabel = document.getElementById('outputFormatLabel');
     const status = document.getElementById('convertStatus');
     const inputLabel = document.getElementById('inputFormatLabel');
 
@@ -56,6 +57,19 @@ export function initConverter() {
         console.error('[CONVERTER] missing elements');
         return;
     }
+
+    function updateOutputFormatVisibility() {
+        const mode = modeSelect.value;
+        if (mode === 'toPdf') {
+            formatLabel.style.display = 'none';
+        } else {
+            formatLabel.style.display = 'flex';
+        }
+        console.log('[CONVERTER] Mode changed to:', mode, 'output format visible:', mode !== 'toPdf');
+    }
+
+    modeSelect.addEventListener('change', updateOutputFormatVisibility);
+    updateOutputFormatVisibility();
 
     drop.addEventListener('click', () => input.click());
     drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
