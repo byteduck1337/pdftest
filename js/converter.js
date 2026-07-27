@@ -1,434 +1,323 @@
-import { 
-    downloadBlob, readFileAsDataURL, readFileAsArrayBuffer, 
-    showNotification, escapeHtml, getFileType, formatFileSize,
-    createImageFromDataUrl, dataUrlToBlob
-} from './utils.js';
+import { downloadBlob, readFileAsDataURL, readFileAsArrayBuffer, showNotification, escapeHtml, formatFileSize, getFileType } from './utils.js';
 
 let files = [];
 
 export function initConverter() {
-    console.log('Converter module initializing');
     const container = document.getElementById('convert');
-    if (!container) {
-        console.error('Container #convert not found');
-        return;
-    }
-    
+    if (!container) { console.error('[CONVERTER] container not found'); return; }
+
     container.innerHTML = `
         <div class="tool-card">
-            <h3><i class="fas fa-exchange-alt"></i> Конвертация файлов</h3>
-            
+            <h3><i class="fas fa-arrow-right-arrow-left"></i> Конвертация</h3>
             <div class="drop-zone" id="convertDropZone">
                 <i class="fas fa-cloud-upload-alt"></i>
-                <p>Перетащите файлы сюда или <strong>кликните для выбора</strong></p>
-                <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px;">
-                    Поддерживаются: PNG, JPEG, GIF, WEBP, DOC, DOCX, XLS, XLSX, PDF
-                </p>
-                <input type="file" id="convertInput" multiple 
-                    accept=".png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx,.pdf" 
-                    style="display:none;">
+                <p>Перетащите файлы или <strong>кликните</strong></p>
+                <p style="font-size:0.8rem;color:var(--text-muted);margin-top:6px;">PNG, JPG, WEBP, DOC, DOCX, XLS, XLSX, PDF</p>
+                <input type="file" id="convertInput" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.doc,.docx,.xls,.xlsx,.pdf" style="display:none;">
             </div>
-            
-            <div id="convertFileList" class="file-list"></div>
-            
             <div class="options-panel">
-                <label>
-                    <i class="fas fa-cog"></i> Режим:
+                <label>Входной формат: <span id="inputFormatLabel" style="font-weight:400;color:var(--text);">авто</span></label>
+                <label>Выходной формат:
+                    <select id="outputFormatSelect">
+                        <option value="pdf">PDF</option>
+                        <option value="png">PNG</option>
+                        <option value="docx">DOCX</option>
+                        <option value="txt">TXT</option>
+                    </select>
+                </label>
+                <label>Режим:
                     <select id="convertMode">
-                        <option value="auto">Авто (определять по файлу)</option>
+                        <option value="auto">Авто</option>
                         <option value="toPdf">В PDF</option>
                         <option value="fromPdf">Из PDF</option>
                     </select>
                 </label>
-                <label style="margin-left:auto;">
-                    <i class="fas fa-file-export"></i> Выходной формат:
-                    <select id="outputFormat">
-                        <option value="pdf">PDF</option>
-                        <option value="png">PNG</option>
-                        <option value="docx">DOCX</option>
-                    </select>
-                </label>
             </div>
-            
+            <div id="convertFileList" class="file-list"></div>
             <div class="btn-group">
-                <button class="btn btn-primary" id="convertBtn">
-                    <i class="fas fa-exchange-alt"></i> Конвертировать
-                </button>
-                <button class="btn btn-secondary" id="clearConvertBtn">
-                    <i class="fas fa-trash"></i> Очистить
-                </button>
+                <button class="btn btn-primary" id="convertBtn"><i class="fas fa-play"></i> Конвертировать</button>
+                <button class="btn btn-secondary" id="clearConvertBtn"><i class="fas fa-trash"></i> Очистить</button>
             </div>
-            
-            <div id="convertStatus" class="status">
-                <i class="fas fa-info-circle"></i> Добавьте файлы для конвертации
-            </div>
+            <div id="convertStatus" class="status"><i class="fas fa-info-circle"></i> Добавьте файлы</div>
         </div>
     `;
 
-    const dropZone = document.getElementById('convertDropZone');
+    const drop = document.getElementById('convertDropZone');
     const input = document.getElementById('convertInput');
-    const fileList = document.getElementById('convertFileList');
+    const list = document.getElementById('convertFileList');
     const convertBtn = document.getElementById('convertBtn');
     const clearBtn = document.getElementById('clearConvertBtn');
     const modeSelect = document.getElementById('convertMode');
-    const formatSelect = document.getElementById('outputFormat');
-    const statusEl = document.getElementById('convertStatus');
+    const formatSelect = document.getElementById('outputFormatSelect');
+    const status = document.getElementById('convertStatus');
+    const inputLabel = document.getElementById('inputFormatLabel');
 
-    if (!dropZone || !input || !fileList || !convertBtn || !clearBtn) {
-        console.error('Converter elements not found');
+    if (!drop || !input || !list || !convertBtn || !clearBtn) {
+        console.error('[CONVERTER] missing elements');
         return;
     }
 
-    console.log('Converter elements found');
-
-    dropZone.addEventListener('click', () => input.click());
-    dropZone.addEventListener('dragover', e => {
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+    drop.addEventListener('drop', e => {
         e.preventDefault();
-        dropZone.classList.add('dragover');
-    });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-    dropZone.addEventListener('drop', e => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        console.log('Files dropped:', e.dataTransfer.files.length);
+        drop.classList.remove('dragover');
         handleFiles(e.dataTransfer.files);
     });
-
     input.addEventListener('change', e => {
-        if (e.target.files.length) {
-            console.log('Files selected:', e.target.files.length);
-            handleFiles(e.target.files);
-        }
+        if (e.target.files.length) handleFiles(e.target.files);
         input.value = '';
     });
 
-    async function handleFiles(fileList_) {
-        console.log('Handling files:', fileList_.length);
-        const newFiles = Array.from(fileList_).filter(f => {
+    async function handleFiles(fileList) {
+        const newFiles = Array.from(fileList).filter(f => getFileType(f.name) !== 'unknown');
+        for (const f of newFiles) {
             const type = getFileType(f.name);
-            return ['image', 'document', 'pdf'].includes(type);
-        });
-
-        console.log('Filtered files:', newFiles.length);
-
-        for (const file of newFiles) {
-            const type = getFileType(file.name);
             try {
-                const dataUrl = type === 'pdf' ? null : await readFileAsDataURL(file);
-                const arrayBuffer = type === 'pdf' ? await readFileAsArrayBuffer(file) : null;
-                files.push({
-                    file,
-                    name: file.name,
-                    size: file.size,
-                    type: type,
-                    dataUrl: dataUrl,
-                    arrayBuffer: arrayBuffer
-                });
-                console.log('File added:', file.name, type);
-            } catch (e) {
-                console.error('Error reading file:', file.name, e);
-            }
+                const dataUrl = type === 'pdf' ? null : await readFileAsDataURL(f);
+                const arrayBuffer = type === 'pdf' ? await readFileAsArrayBuffer(f) : null;
+                files.push({ file: f, name: f.name, size: f.size, type, dataUrl, arrayBuffer });
+            } catch (e) { console.error('[CONVERTER] read error:', f.name, e); }
         }
-
-        renderFileList();
+        renderList();
         updateStatus(`Добавлено ${newFiles.length} файлов`, 'info');
+        if (files.length > 0) {
+            const types = [...new Set(files.map(f => f.type))];
+            inputLabel.textContent = types.join(', ');
+        }
     }
 
-    function renderFileList() {
-        fileList.innerHTML = '';
-        if (files.length === 0) {
-            fileList.innerHTML = `
-                <div style="text-align:center; color:var(--text-muted); padding:20px;">
-                    <i class="fas fa-inbox" style="font-size:2rem; display:block; margin-bottom:8px;"></i>
-                    Нет добавленных файлов
-                </div>
-            `;
+    function renderList() {
+        list.innerHTML = '';
+        if (!files.length) {
+            list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:16px;"><i class="fas fa-inbox" style="display:block;font-size:1.6rem;margin-bottom:6px;"></i>Нет файлов</div>`;
             return;
         }
-
-        files.forEach((f, index) => {
+        files.forEach((f, i) => {
             const div = document.createElement('div');
             div.className = 'file-item';
-            const iconMap = {
-                image: 'fa-image',
-                document: 'fa-file-word',
-                pdf: 'fa-file-pdf'
-            };
+            const icon = { image:'fa-image', document:'fa-file-alt', pdf:'fa-file-pdf' }[f.type] || 'fa-file';
             div.innerHTML = `
-                <span><i class="fas ${iconMap[f.type] || 'fa-file'}"></i></span>
-                <span class="name">${escapeHtml(f.name)} (${formatFileSize(f.size)})</span>
-                <span style="color:var(--text-muted); font-size:0.85rem; text-transform:uppercase;">${f.type}</span>
-                <span class="remove" data-index="${index}"><i class="fas fa-times"></i></span>
+                <i class="fas ${icon}"></i>
+                <span class="name">${escapeHtml(f.name)}</span>
+                <span class="size">${formatFileSize(f.size)}</span>
+                <span class="remove" data-index="${i}"><i class="fas fa-times"></i></span>
             `;
-            fileList.appendChild(div);
+            list.appendChild(div);
         });
-
-        document.querySelectorAll('.remove').forEach(btn => {
-            btn.addEventListener('click', e => {
+        list.querySelectorAll('.remove').forEach(el => {
+            el.addEventListener('click', e => {
                 const idx = parseInt(e.currentTarget.dataset.index);
                 files.splice(idx, 1);
-                renderFileList();
+                renderList();
                 updateStatus('Файл удалён', 'info');
+                if (!files.length) inputLabel.textContent = 'авто';
             });
         });
     }
 
-    clearBtn.addEventListener('click', () => {
-        files = [];
-        renderFileList();
-        updateStatus('Список очищен', 'info');
-        showNotification('Список очищен', 'info');
-    });
+    clearBtn.addEventListener('click', () => { files = []; renderList(); updateStatus('Очищено', 'info'); inputLabel.textContent = 'авто'; showNotification('Очищено', 'info'); });
 
     convertBtn.addEventListener('click', async () => {
-        console.log('Convert button clicked');
-        if (files.length === 0) {
-            showNotification('Добавьте хотя бы один файл', 'warning');
-            return;
-        }
-
+        if (!files.length) { showNotification('Добавьте файлы', 'warning'); return; }
         const mode = modeSelect.value;
-        const output = formatSelect.value;
-
+        const outFormat = formatSelect.value;
         let targetMode = mode;
         if (mode === 'auto') {
             const allPdf = files.every(f => f.type === 'pdf');
             targetMode = allPdf ? 'fromPdf' : 'toPdf';
         }
-
-        console.log('Target mode:', targetMode);
-
-        if (targetMode === 'toPdf') {
-            await convertToPdf(output);
-        } else {
-            await convertFromPdf(output);
-        }
+        if (targetMode === 'toPdf') await convertToPdf(outFormat);
+        else await convertFromPdf(outFormat);
     });
 
-    async function loadUnicodeFont(pdfDoc) {
+    async function extractDocxText(arrayBuffer) {
         try {
-            const fontUrl = 'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf';
-            const fontBytes = await fetch(fontUrl).then(res => res.arrayBuffer());
-            pdfDoc.registerFontkit(window.fontkit);
-            return await pdfDoc.embedFont(fontBytes);
+            const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+            return result.value || '';
         } catch (e) {
-            console.warn('Failed to load Roboto, falling back to TimesRoman:', e);
-            return await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
+            console.error('[CONVERTER] mammoth raw text error:', e);
+            try {
+                const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+                const text = result.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                return text || '';
+            } catch (e2) {
+                console.error('[CONVERTER] mammoth html fallback error:', e2);
+                return '';
+            }
         }
     }
 
-    async function convertToPdf(outputFormat) {
-        console.log('Converting to PDF');
+    async function convertToPdf(outFormat) {
         try {
             updateStatus('Конвертация в PDF...', 'info');
             const { PDFDocument } = PDFLib;
             const pdfDoc = await PDFDocument.create();
             
-            let unicodeFont = null;
-            let fontLoaded = false;
-
             for (const f of files) {
-                console.log('Processing file:', f.name, f.type);
+                console.log('[CONVERTER] Processing:', f.name, f.type);
+                
                 if (f.type === 'image') {
-                    const img = await createImageFromDataUrl(f.dataUrl);
-                    let imageEmbed;
+                    const img = new Image();
+                    img.src = f.dataUrl;
+                    await new Promise(r => { img.onload = r; img.onerror = r; });
+                    if (!img.width || !img.height) {
+                        console.error('[CONVERTER] Invalid image:', f.name);
+                        continue;
+                    }
+                    let embed;
                     const ext = f.name.split('.').pop().toLowerCase();
-                    if (ext === 'png') {
-                        imageEmbed = await pdfDoc.embedPng(f.dataUrl);
-                    } else {
-                        imageEmbed = await pdfDoc.embedJpg(f.dataUrl);
+                    try {
+                        if (ext === 'png') embed = await pdfDoc.embedPng(f.dataUrl);
+                        else embed = await pdfDoc.embedJpg(f.dataUrl);
+                    } catch(e) {
+                        console.error('[CONVERTER] Image embed error:', e);
+                        continue;
                     }
                     const page = pdfDoc.addPage([img.width, img.height]);
-                    page.drawImage(imageEmbed, { x: 0, y: 0, width: img.width, height: img.height });
-                } else if (f.type === 'document') {
-                    if (!fontLoaded) {
-                        unicodeFont = await loadUnicodeFont(pdfDoc);
-                        fontLoaded = true;
-                    }
+                    page.drawImage(embed, { x:0, y:0, width:img.width, height:img.height });
                     
+                } else if (f.type === 'document') {
                     const ext = f.name.split('.').pop().toLowerCase();
                     const page = pdfDoc.addPage([595, 842]);
+                    const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
                     
-                    try {
-                        let text = '';
-                        if (ext === 'docx') {
-                            const result = await mammoth.convertToHtml({ arrayBuffer: await f.file.arrayBuffer() });
-                            text = result.value.replace(/<[^>]*>/g, ' ').trim();
-                        } else if (ext === 'doc' || ext === 'txt') {
-                            text = await f.file.text();
-                        } else if (ext === 'xls' || ext === 'xlsx') {
-                            text = await f.file.text();
-                        } else {
-                            text = await f.file.text();
+                    let text = '';
+                    if (ext === 'docx') {
+                        try {
+                            const arrayBuffer = await f.file.arrayBuffer();
+                            text = await extractDocxText(arrayBuffer);
+                        } catch(e) {
+                            console.error('[CONVERTER] DOCX extract error:', e);
+                            text = '[Ошибка извлечения текста из DOCX]';
                         }
-                        
-                        if (!text || text.trim().length === 0) {
-                            page.drawText('Документ не содержит текста', {
-                                x: 40,
-                                y: 800,
-                                size: 14,
-                                font: unicodeFont || await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman),
-                                color: { r: 0.7, g: 0.7, b: 0.7 }
-                            });
-                            continue;
+                    } else if (ext === 'doc' || ext === 'txt') {
+                        try {
+                            text = await f.file.text();
+                        } catch(e) {
+                            console.error('[CONVERTER] Text read error:', e);
+                            text = '[Ошибка чтения текста]';
                         }
+                    } else if (ext === 'xlsx' || ext === 'xls') {
+                        text = '[Excel файлы требуют специальной обработки]';
+                    } else {
+                        text = '[Неподдерживаемый формат документа]';
+                    }
 
-                        const font = unicodeFont || await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
-                        const fontSize = 11;
-                        const maxWidth = 500;
-                        const lineHeight = fontSize + 4;
-                        
-                        let lines = [];
-                        let currentLine = '';
-                        let words = text.split(/\s+/);
-                        
-                        for (const word of words) {
-                            if (!word) continue;
-                            const testLine = currentLine ? currentLine + ' ' + word : word;
-                            if (testLine.length > 80) {
-                                if (currentLine) {
-                                    lines.push(currentLine);
-                                    currentLine = word;
-                                } else {
-                                    lines.push(word);
-                                    currentLine = '';
-                                }
-                            } else {
-                                currentLine = testLine;
-                            }
-                        }
-                        if (currentLine) lines.push(currentLine);
-
+                    if (text && text.length > 0) {
+                        const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
                         let y = 800;
-                        for (const line of lines) {
-                            if (y < 40) break;
+                        const maxLines = 45;
+                        const lineHeight = 16;
+                        
+                        for (let i = 0; i < Math.min(lines.length, maxLines); i++) {
+                            const line = lines[i].substring(0, 120);
                             try {
-                                page.drawText(line, {
-                                    x: 40,
-                                    y: y,
-                                    size: fontSize,
-                                    font: font,
+                                page.drawText(line, { 
+                                    x: 40, 
+                                    y: y - i * lineHeight, 
+                                    size: 10, 
+                                    font,
                                     color: { r: 0, g: 0, b: 0 }
                                 });
-                            } catch (e) {
-                                console.warn('Failed to draw text line, skipping:', line.substring(0, 20));
+                            } catch(e) {
+                                console.warn('[CONVERTER] Failed to draw text line:', i, e);
                             }
-                            y -= lineHeight;
                         }
-
-                        if (lines.length === 0) {
-                            page.drawText('(пустой документ)', {
+                        
+                        if (lines.length > maxLines) {
+                            try {
+                                page.drawText('... и еще ' + (lines.length - maxLines) + ' строк', {
+                                    x: 40,
+                                    y: y - maxLines * lineHeight - 10,
+                                    size: 10,
+                                    font,
+                                    color: { r: 0.5, g: 0.5, b: 0.5 }
+                                });
+                            } catch(e) {}
+                        }
+                    } else {
+                        try {
+                            page.drawText('[Нет текста для отображения]', {
                                 x: 40,
                                 y: 800,
                                 size: 12,
-                                font: font,
+                                font,
                                 color: { r: 0.5, g: 0.5, b: 0.5 }
                             });
-                        }
-                    } catch (e) {
-                        console.error('Document conversion error:', e);
-                        const fallbackFont = await pdfDoc.embedFont(PDFLib.StandardFonts.TimesRoman);
-                        page.drawText('Ошибка конвертации документа: ' + e.message, {
-                            x: 40,
-                            y: 800,
-                            size: 12,
-                            font: fallbackFont,
-                            color: { r: 1, g: 0, b: 0 }
-                        });
+                        } catch(e) {}
+                    }
+                } else if (f.type === 'pdf') {
+                    try {
+                        const pdf = await PDFDocument.load(f.arrayBuffer);
+                        const pages = await pdfDoc.copyPages(pdf, pdf.getPageIndices());
+                        pages.forEach(p => pdfDoc.addPage(p));
+                    } catch(e) {
+                        console.error('[CONVERTER] PDF copy error:', e);
                     }
                 }
             }
 
             const pdfBytes = await pdfDoc.save();
-            downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), 'converted.pdf');
-            updateStatus(`Конвертация завершена! ${files.length} файлов → PDF`, 'success');
-            showNotification('PDF успешно создан!', 'success');
-        } catch (error) {
-            console.error('Convert error:', error);
-            updateStatus('Ошибка: ' + error.message, 'error');
-            showNotification('Ошибка конвертации: ' + error.message, 'error');
+            downloadBlob(new Blob([pdfBytes], {type:'application/pdf'}), 'converted.pdf');
+            updateStatus(`Готово! ${files.length} файлов → PDF`, 'success');
+            showNotification('PDF создан', 'success');
+        } catch(e) {
+            console.error('[CONVERTER] toPdf error:', e);
+            updateStatus('Ошибка: ' + e.message, 'error');
+            showNotification('Ошибка: ' + e.message, 'error');
         }
     }
 
-    async function convertFromPdf(outputFormat) {
-        console.log('Converting from PDF');
+    async function convertFromPdf(outFormat) {
         try {
+            const pdfFiles = files.filter(f => f.type === 'pdf');
+            if (!pdfFiles.length) { showNotification('Нет PDF', 'warning'); return; }
             updateStatus('Конвертация из PDF...', 'info');
             
-            const pdfFiles = files.filter(f => f.type === 'pdf');
-            if (pdfFiles.length === 0) {
-                showNotification('Нет PDF файлов для конвертации', 'warning');
-                return;
-            }
-
-            if (outputFormat === 'png') {
-                const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfFiles[0].arrayBuffer }).promise;
+            const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfFiles[0].arrayBuffer }).promise;
+            
+            if (outFormat === 'png') {
                 for (let i = 1; i <= pdfJsDoc.numPages; i++) {
                     const page = await pdfJsDoc.getPage(i);
-                    const viewport = page.getViewport({ scale: 2 });
+                    const viewport = page.getViewport({ scale: 1.5 });
                     const canvas = document.createElement('canvas');
-                    canvas.width = viewport.width;
+                    canvas.width = viewport.width; 
                     canvas.height = viewport.height;
                     const ctx = canvas.getContext('2d');
                     await page.render({ canvasContext: ctx, viewport }).promise;
-                    
-                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                    const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
                     downloadBlob(blob, `page-${i}.png`);
                 }
-                updateStatus(`Конвертация завершена! ${pdfJsDoc.numPages} страниц → PNG`, 'success');
-                showNotification(`Создано ${pdfJsDoc.numPages} PNG изображений`, 'success');
+                updateStatus(`${pdfJsDoc.numPages} страниц → PNG`, 'success');
+                showNotification(`${pdfJsDoc.numPages} PNG`, 'success');
             } else {
-                const pdfJsDoc = await pdfjsLib.getDocument({ data: pdfFiles[0].arrayBuffer }).promise;
-                const totalPages = pdfJsDoc.numPages;
-                
-                for (let i = 1; i <= totalPages; i++) {
+                let allText = '';
+                for (let i = 1; i <= pdfJsDoc.numPages; i++) {
                     const page = await pdfJsDoc.getPage(i);
-                    const viewport = page.getViewport({ scale: 2 });
-                    const canvas = document.createElement('canvas');
-                    canvas.width = viewport.width;
-                    canvas.height = viewport.height;
-                    const ctx = canvas.getContext('2d');
-                    await page.render({ canvasContext: ctx, viewport }).promise;
-                    
-                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                    const reader = new FileReader();
-                    reader.onload = async function(e) {
-                        const dataUrl = e.target.result;
-                        const { PDFDocument } = PDFLib;
-                        const pdfDoc = await PDFDocument.create();
-                        const img = await pdfDoc.embedPng(dataUrl);
-                        const pageDoc = pdfDoc.addPage([img.width, img.height]);
-                        pageDoc.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height });
-                        const pdfBytes = await pdfDoc.save();
-                        downloadBlob(new Blob([pdfBytes], { type: 'application/pdf' }), `page-${i}.pdf`);
-                    };
-                    reader.readAsDataURL(blob);
+                    const content = await page.getTextContent();
+                    const text = content.items.map(t => t.str).join(' ');
+                    allText += text + '\n\n';
                 }
-                
-                setTimeout(() => {
-                    updateStatus(`Конвертация завершена! ${totalPages} страниц → PDF с изображениями`, 'success');
-                    showNotification(`Создано ${totalPages} PDF страниц с изображениями`, 'success');
-                }, 1000);
+                const blob = new Blob([allText], {type:'text/plain;charset=utf-8'});
+                downloadBlob(blob, 'extracted.txt');
+                updateStatus('Текст извлечён', 'success');
+                showNotification('TXT готов', 'success');
             }
-        } catch (error) {
-            console.error('Convert from PDF error:', error);
-            updateStatus('Ошибка: ' + error.message, 'error');
-            showNotification('Ошибка конвертации: ' + error.message, 'error');
+        } catch(e) {
+            console.error('[CONVERTER] fromPdf error:', e);
+            updateStatus('Ошибка: ' + e.message, 'error');
+            showNotification('Ошибка: ' + e.message, 'error');
         }
     }
 
-    function updateStatus(message, type = 'info') {
-        const icons = {
-            info: 'fa-info-circle',
-            success: 'fa-check-circle',
-            error: 'fa-exclamation-circle',
-            warning: 'fa-exclamation-triangle'
-        };
-        statusEl.className = `status ${type}`;
-        statusEl.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i> ${message}`;
+    function updateStatus(msg, type='info') {
+        const icons = { info:'fa-info-circle', success:'fa-check-circle', error:'fa-exclamation-circle', warning:'fa-exclamation-triangle' };
+        status.className = `status ${type}`;
+        status.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i> ${msg}`;
     }
 
-    renderFileList();
-    updateStatus('Добавьте файлы для конвертации', 'info');
-    console.log('Converter module initialized');
+    renderList();
+    updateStatus('Добавьте файлы', 'info');
 }
