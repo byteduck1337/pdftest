@@ -132,21 +132,78 @@ export function initConverter() {
         else await convertFromPdf(outFormat);
     });
 
-    async function extractDocxText(arrayBuffer) {
+    async function extractDocxTextViaZip(arrayBuffer) {
+        try {
+            const JSZip = window.JSZip;
+            if (!JSZip) {
+                console.warn('[CONVERTER] JSZip not available, using mammoth fallback');
+                return await extractDocxTextFallback(arrayBuffer);
+            }
+            
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            const docFile = zip.file("word/document.xml");
+            if (!docFile) {
+                console.warn('[CONVERTER] No document.xml found');
+                return await extractDocxTextFallback(arrayBuffer);
+            }
+            
+            const xmlText = await docFile.async("text");
+            const textMatches = xmlText.match(/>([^<]+)</g) || [];
+            const text = textMatches
+                .map(m => m.replace(/[<>]/g, '').trim())
+                .filter(t => t.length > 0)
+                .join(' ');
+            
+            console.log('[CONVERTER] Extracted via ZIP:', text.length, 'chars');
+            return text || await extractDocxTextFallback(arrayBuffer);
+        } catch (e) {
+            console.error('[CONVERTER] ZIP extraction error:', e);
+            return await extractDocxTextFallback(arrayBuffer);
+        }
+    }
+
+    async function extractDocxTextFallback(arrayBuffer) {
         try {
             const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
-            return result.value || '';
-        } catch (e) {
-            console.error('[CONVERTER] mammoth raw text error:', e);
-            try {
-                const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
-                const text = result.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-                return text || '';
-            } catch (e2) {
-                console.error('[CONVERTER] mammoth html fallback error:', e2);
-                return '';
+            if (result.value && result.value.trim().length > 0) {
+                return result.value;
             }
+        } catch (e) {
+            console.warn('[CONVERTER] mammoth raw text error:', e);
         }
+        
+        try {
+            const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+            const text = result.value.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (text.length > 0) return text;
+        } catch (e) {
+            console.warn('[CONVERTER] mammoth html error:', e);
+        }
+        
+        return '';
+    }
+
+    async function extractDocxText(arrayBuffer) {
+        try {
+            let text = await extractDocxTextViaZip(arrayBuffer);
+            if (text && text.trim().length > 0) {
+                return text;
+            }
+            
+            text = await extractDocxTextFallback(arrayBuffer);
+            return text || '';
+        } catch (e) {
+            console.error('[CONVERTER] All DOCX extraction methods failed:', e);
+            return '';
+        }
+    }
+
+    function sanitizeTextForPDF(text) {
+        if (!text) return '';
+        return text
+            .replace(/[\x00-\x1F\x7F-\x9F]/g, '')
+            .replace(/[^\x20-\x7E\u0400-\u04FF]/g, '')
+            .trim();
     }
 
     async function convertToPdf(outFormat) {
@@ -184,45 +241,45 @@ export function initConverter() {
                     const font = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
                     
                     let text = '';
-                    if (ext === 'docx') {
-                        try {
+                    try {
+                        if (ext === 'docx') {
                             const arrayBuffer = await f.file.arrayBuffer();
                             text = await extractDocxText(arrayBuffer);
-                        } catch(e) {
-                            console.error('[CONVERTER] DOCX extract error:', e);
-                            text = '[Ошибка извлечения текста из DOCX]';
-                        }
-                    } else if (ext === 'doc' || ext === 'txt') {
-                        try {
+                        } else if (ext === 'doc' || ext === 'txt') {
                             text = await f.file.text();
-                        } catch(e) {
-                            console.error('[CONVERTER] Text read error:', e);
-                            text = '[Ошибка чтения текста]';
+                        } else if (ext === 'xlsx' || ext === 'xls') {
+                            text = '[Excel файлы требуют специальной обработки]';
+                        } else {
+                            text = '[Неподдерживаемый формат документа]';
                         }
-                    } else if (ext === 'xlsx' || ext === 'xls') {
-                        text = '[Excel файлы требуют специальной обработки]';
-                    } else {
-                        text = '[Неподдерживаемый формат документа]';
+                    } catch(e) {
+                        console.error('[CONVERTER] Text extraction error:', e);
+                        text = '[Ошибка извлечения текста: ' + e.message + ']';
                     }
+
+                    text = sanitizeTextForPDF(text);
+                    console.log('[CONVERTER] Extracted text length:', text.length);
 
                     if (text && text.length > 0) {
                         const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
                         let y = 800;
                         const maxLines = 45;
-                        const lineHeight = 16;
+                        const lineHeight = 14;
+                        const fontSize = 9;
                         
                         for (let i = 0; i < Math.min(lines.length, maxLines); i++) {
-                            const line = lines[i].substring(0, 120);
+                            const line = sanitizeTextForPDF(lines[i]).substring(0, 120);
+                            if (line.length === 0) continue;
                             try {
                                 page.drawText(line, { 
                                     x: 40, 
                                     y: y - i * lineHeight, 
-                                    size: 10, 
+                                    size: fontSize, 
                                     font,
                                     color: { r: 0, g: 0, b: 0 }
                                 });
                             } catch(e) {
-                                console.warn('[CONVERTER] Failed to draw text line:', i, e);
+                                console.warn('[CONVERTER] Failed to draw line:', i, e.message);
                             }
                         }
                         
@@ -231,15 +288,15 @@ export function initConverter() {
                                 page.drawText('... и еще ' + (lines.length - maxLines) + ' строк', {
                                     x: 40,
                                     y: y - maxLines * lineHeight - 10,
-                                    size: 10,
+                                    size: 9,
                                     font,
-                                    color: { r: 0.5, g: 0.5, b: 0.5 }
+                                    color: { r: 0.4, g: 0.4, b: 0.4 }
                                 });
                             } catch(e) {}
                         }
                     } else {
                         try {
-                            page.drawText('[Нет текста для отображения]', {
+                            page.drawText('[Текст не найден в документе]', {
                                 x: 40,
                                 y: 800,
                                 size: 12,
