@@ -1,6 +1,4 @@
 ﻿import { initConverter } from './converter.js';
-import { initPdfEditor } from './pdfEditor.js';
-import { initMerge } from './merge.js';
 
 console.log('App module loaded');
 
