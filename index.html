@@ -1,776 +1,152 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PDF OCR Редактор PRO</title>
-    
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.5/tesseract.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
-
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            background: #f6f8fc;
-            color: #1e293b;
-            padding: 24px;
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 28px;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
-
-        .logo {
-            font-size: 24px;
-            font-weight: 600;
-            background: linear-gradient(135deg, #0f172a, #3b82f6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            letter-spacing: -0.5px;
-        }
-
-        .badge {
-            background: #3b82f6;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 40px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .toolbar {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .btn {
-            background: white;
-            border: 1px solid #e2e8f0;
-            padding: 10px 20px;
-            border-radius: 40px;
-            font-size: 14px;
-            font-weight: 500;
-            color: #1e293b;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-family: 'Inter', sans-serif;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn:hover {
-            background: #f1f5f9;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        }
-
-        .btn-primary {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-        }
-
-        .btn-primary:hover {
-            background: #1e293b;
-        }
-
-        .btn-success {
-            background: #22c55e;
-            color: white;
-            border-color: #22c55e;
-        }
-
-        .btn-success:hover {
-            background: #16a34a;
-        }
-
-        .btn-danger {
-            background: #ef4444;
-            color: white;
-            border-color: #ef4444;
-        }
-
-        .btn-danger:hover {
-            background: #dc2626;
-        }
-
-        .file-input-wrap {
-            position: relative;
-        }
-
-        .file-input-wrap input[type="file"] {
-            position: absolute;
-            opacity: 0;
-            width: 100%;
-            height: 100%;
-            cursor: pointer;
-        }
-
-        .workspace {
-            background: white;
-            border-radius: 24px;
-            box-shadow: 0 20px 60px -12px rgba(0,0,0,0.08);
-            padding: 24px;
-            border: 1px solid #f1f5f9;
-        }
-
-        #pdfContainer {
-            position: relative;
-            width: 100%;
-            min-height: 600px;
-            background: #f8fafc;
-            border-radius: 16px;
-            overflow: hidden;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        #pdfCanvas {
-            display: block;
-            max-width: 100%;
-            height: auto;
-        }
-
-        #fabricCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-
-        .status-bar {
-            margin-top: 18px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 14px;
-            color: #64748b;
-            padding-top: 18px;
-            border-top: 1px solid #f1f5f9;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        .status-left {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .status-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .hint {
-            background: #f1f5f9;
-            padding: 4px 16px;
-            border-radius: 40px;
-            font-size: 13px;
-            color: #475569;
-        }
-
-        .page-controls {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-
-        .page-controls input {
-            width: 50px;
-            padding: 4px 8px;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            text-align: center;
-            font-family: 'Inter', sans-serif;
-        }
-
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.4);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            padding: 20px;
-        }
-
-        .modal-overlay.active {
-            display: flex;
-        }
-
-        .modal {
-            background: white;
-            border-radius: 32px;
-            max-width: 560px;
-            width: 100%;
-            padding: 32px;
-            box-shadow: 0 40px 80px -20px rgba(0,0,0,0.3);
-            animation: slideUp 0.3s ease;
-        }
-
-        @keyframes slideUp {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-
-        .modal h3 {
-            font-size: 20px;
-            font-weight: 500;
-            margin-bottom: 6px;
-        }
-
-        .modal .sub {
-            color: #64748b;
-            font-size: 14px;
-            margin-bottom: 20px;
-        }
-
-        .modal textarea {
-            width: 100%;
-            border: 1px solid #e2e8f0;
-            border-radius: 16px;
-            padding: 14px 18px;
-            font-size: 15px;
-            font-family: 'Inter', sans-serif;
-            min-height: 140px;
-            resize: vertical;
-            transition: 0.15s;
-            background: #fafcff;
-        }
-
-        .modal textarea:focus {
-            outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-        }
-
-        .modal-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 12px;
-            margin-top: 20px;
-        }
-
-        .loading {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #e2e8f0;
-            border-top-color: #3b82f6;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        @media (max-width: 768px) {
-            .header { flex-direction: column; align-items: stretch; }
-            .toolbar { flex-wrap: wrap; }
-            .btn { font-size: 13px; padding: 8px 16px; }
-            .modal { padding: 24px; }
-        }
-    </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Конвертер</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <header class="header">
-            <div>
-                <span class="logo">✦ PDF OCR Editor</span>
-                <span class="badge">PRO</span>
-            </div>
-            <div class="toolbar">
-                <div class="file-input-wrap">
-                    <button class="btn">📄 Загрузить PDF</button>
-                    <input type="file" id="pdfUpload" accept=".pdf" />
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-file-pdf"></i>
+                    <h1>PDF Конвертер</h1>
                 </div>
-                <button class="btn btn-primary" id="ocrModeBtn">🔍 OCR режим</button>
-                <button class="btn btn-success" id="applyEditsBtn">💾 Применить правки</button>
-                <button class="btn btn-danger" id="clearBtn">✕ Очистить</button>
+                <p class="subtitle">Конвертируйте изображения в PDF за секунды</p>
             </div>
         </header>
 
-        <div class="workspace">
-            <div id="pdfContainer">
-                <canvas id="pdfCanvas"></canvas>
-                <canvas id="fabricCanvas"></canvas>
-            </div>
-
-            <div class="status-bar">
-                <div class="status-left">
-                    <span id="pageInfo">📄 Нет файла</span>
-                    <div class="page-controls">
-                        <button class="btn" id="prevPage" style="padding: 4px 12px;">◀</button>
-                        <input type="number" id="pageInput" value="1" min="1" />
-                        <span id="totalPages">/ 0</span>
-                        <button class="btn" id="nextPage" style="padding: 4px 12px;">▶</button>
+        <!-- Основной контент -->
+        <main class="main-content">
+            <div class="converter-wrapper">
+                <!-- Зона загрузки -->
+                <div class="upload-section">
+                    <div class="drop-zone" id="dropZone">
+                        <div class="drop-zone-content">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <h3>Перетащите файлы сюда</h3>
+                            <p>или кликните для выбора</p>
+                            <div class="supported-formats">
+                                <span class="format-tag"><i class="fas fa-image"></i> PNG</span>
+                                <span class="format-tag"><i class="fas fa-image"></i> JPEG</span>
+                                <span class="format-tag"><i class="fas fa-image"></i> GIF</span>
+                                <span class="format-tag"><i class="fas fa-image"></i> WEBP</span>
+                                <span class="format-tag"><i class="fas fa-image"></i> BMP</span>
+                                <span class="format-tag"><i class="fas fa-image"></i> TIFF</span>
+                                <span class="format-tag"><i class="fas fa-image"></i> SVG</span>
+                                <span class="format-tag" style="background:#fee2e2; border-color:#dc2626; color:#dc2626;">
+                                    <i class="fas fa-file-pdf"></i> .do → PDF
+                                </span>
+                            </div>
+                        </div>
+                        <input type="file" id="fileInput" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.tiff,.svg,.do" style="display:none;">
                     </div>
                 </div>
-                <div class="status-right">
-                    <span class="hint" id="ocrHint">Загрузите PDF для начала</span>
-                    <span id="apiStatus" style="font-size: 12px;">⚪ API: не проверен</span>
+
+                <!-- Настройки -->
+                <div class="settings-section">
+                    <div class="settings-row">
+                        <div class="setting-group">
+                            <label><i class="fas fa-file-alt"></i> Размер страницы</label>
+                            <select id="pageSize">
+                                <option value="fit">По размеру изображения</option>
+                                <option value="a4">A4</option>
+                                <option value="letter">Letter</option>
+                                <option value="a3">A3</option>
+                            </select>
+                        </div>
+                        <div class="setting-group">
+                            <label><i class="fas fa-compress"></i> Качество</label>
+                            <div class="quality-control">
+                                <input type="range" id="quality" min="10" max="100" value="90">
+                                <span id="qualityLabel">90%</span>
+                            </div>
+                        </div>
+                        <div class="setting-group">
+                            <label><i class="fas fa-arrows-alt"></i> Ориентация</label>
+                            <select id="orientation">
+                                <option value="auto">Авто</option>
+                                <option value="portrait">Книжная</option>
+                                <option value="landscape">Альбомная</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Статистика -->
+                <div class="stats-bar" id="statsBar">
+                    <div class="stat-item">
+                        <i class="fas fa-images"></i>
+                        <span>Файлов: <strong id="fileCount">0</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-weight-hanging"></i>
+                        <span>Общий размер: <strong id="totalSize">0 КБ</strong></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-clock"></i>
+                        <span>Готово к конвертации</span>
+                    </div>
+                </div>
+
+                <!-- Список файлов -->
+                <div class="files-section" id="filesSection">
+                    <div class="files-header">
+                        <div class="files-header-left">
+                            <i class="fas fa-list"></i>
+                            <span>Загруженные файлы</span>
+                        </div>
+                        <div class="files-header-right">
+                            <button class="btn btn-sm btn-outline" id="selectAllBtn">
+                                <i class="fas fa-check-square"></i> Выбрать все
+                            </button>
+                            <button class="btn btn-sm btn-outline" id="sortBtn">
+                                <i class="fas fa-sort-alpha-down"></i> Сортировать
+                            </button>
+                            <button class="btn btn-sm btn-danger" id="clearAllBtn">
+                                <i class="fas fa-trash"></i> Очистить
+                            </button>
+                        </div>
+                    </div>
+                    <div class="files-grid" id="filesGrid"></div>
+                </div>
+
+                <!-- Прогресс -->
+                <div class="progress-section" id="progressSection" style="display:none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-info">
+                        <span id="progressText">Конвертация...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                </div>
+
+                <!-- Кнопки действий -->
+                <div class="actions-section">
+                    <button class="btn btn-primary btn-lg" id="convertBtn">
+                        <i class="fas fa-file-pdf"></i> Конвертировать все в PDF
+                    </button>
+                    <button class="btn btn-secondary btn-lg" id="convertSelectedBtn">
+                        <i class="fas fa-check-circle"></i> Конвертировать выбранные
+                    </button>
                 </div>
             </div>
-        </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Все операции выполняются в браузере. Файлы не загружаются на сервер.</p>
+            <p class="footer-brand">PDF Конвертер &copy; 2026</p>
+        </footer>
     </div>
 
-    <div class="modal-overlay" id="editModal">
-        <div class="modal">
-            <h3>✎ Редактировать текст</h3>
-            <p class="sub">Отредактируйте распознанный текст. После сохранения он будет внедрён в PDF.</p>
-            <textarea id="ocrTextArea" placeholder="Распознанный текст появится здесь..."></textarea>
-            <div class="modal-actions">
-                <button class="btn" id="cancelEditBtn">Отмена</button>
-                <button class="btn btn-primary" id="saveEditBtn">✅ Сохранить в PDF</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        (function() {
-            'use strict';
-
-            //there api
-            const API_URL = 'https://pdf-ocr-editor.fly.dev'; // ЗАМЕНИТЕ НА ВАШ URL
-
-            const pdfContainer = document.getElementById('pdfContainer');
-            const pdfCanvas = document.getElementById('pdfCanvas');
-            const fabricCanvasEl = document.getElementById('fabricCanvas');
-
-            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-            const fabricCanvas = new fabric.Canvas(fabricCanvasEl, {
-                selection: true,
-                preserveObjectStacking: true,
-                backgroundColor: 'transparent'
-            });
-
-            let pdfDoc = null;
-            let currentPage = 1;
-            let totalPages = 0;
-            let scale = 1.5;
-            let isOcrMode = false;
-            let selectedRect = null;
-            let currentFile = null;
-
-            const pageInfo = document.getElementById('pageInfo');
-            const ocrHint = document.getElementById('ocrHint');
-            const apiStatus = document.getElementById('apiStatus');
-            const fileInput = document.getElementById('pdfUpload');
-            const ocrModeBtn = document.getElementById('ocrModeBtn');
-            const clearBtn = document.getElementById('clearBtn');
-            const applyEditsBtn = document.getElementById('applyEditsBtn');
-            const prevPage = document.getElementById('prevPage');
-            const nextPage = document.getElementById('nextPage');
-            const pageInput = document.getElementById('pageInput');
-            const totalPagesSpan = document.getElementById('totalPages');
-
-            const modalOverlay = document.getElementById('editModal');
-            const ocrTextArea = document.getElementById('ocrTextArea');
-            const cancelEditBtn = document.getElementById('cancelEditBtn');
-            const saveEditBtn = document.getElementById('saveEditBtn');
-
-            async function checkAPI() {
-                try {
-                    const response = await fetch(`${API_URL}/health`);
-                    if (response.ok) {
-                        apiStatus.textContent = '🟢 API: онлайн';
-                        apiStatus.style.color = '#22c55e';
-                    }
-                } catch (e) {
-                    apiStatus.textContent = '🔴 API: недоступен';
-                    apiStatus.style.color = '#ef4444';
-                }
-            }
-            checkAPI();
-
-            function calcScale(pageWidth, pageHeight) {
-                const containerWidth = pdfContainer.clientWidth - 40;
-                const containerHeight = pdfContainer.clientHeight - 40;
-                const scaleX = containerWidth / pageWidth;
-                const scaleY = containerHeight / pageHeight;
-                return Math.min(scaleX, scaleY, 2.0);
-            }
-
-            async function renderPage(pageNum) {
-                if (!pdfDoc) return;
-                try {
-                    const page = await pdfDoc.getPage(pageNum);
-                    const viewport = page.getViewport({ scale: 1 });
-                    const pageWidth = viewport.width;
-                    const pageHeight = viewport.height;
-
-                    scale = calcScale(pageWidth, pageHeight);
-                    const scaledViewport = page.getViewport({ scale });
-
-                    pdfCanvas.width = scaledViewport.width;
-                    pdfCanvas.height = scaledViewport.height;
-                    pdfCanvas.style.width = scaledViewport.width + 'px';
-                    pdfCanvas.style.height = scaledViewport.height + 'px';
-
-                    const ctx = pdfCanvas.getContext('2d');
-                    await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
-
-                    fabricCanvas.setWidth(scaledViewport.width);
-                    fabricCanvas.setHeight(scaledViewport.height);
-                    fabricCanvas.renderAll();
-
-                    pageInfo.textContent = `📄 Стр. ${pageNum} из ${totalPages}`;
-                    pageInput.value = pageNum;
-                    totalPagesSpan.textContent = `/ ${totalPages}`;
-                } catch (err) {
-                    console.error('Render error:', err);
-                }
-            }
-
-            async function loadPDF(file) {
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    totalPages = pdfDoc.numPages;
-                    currentPage = 1;
-                    currentFile = file;
-                    await renderPage(currentPage);
-                    fabricCanvas.clear();
-                    selectedRect = null;
-                    ocrHint.textContent = '✅ PDF загружен. Включите OCR режим и выделите текст';
-                } catch (err) {
-                    alert('Ошибка загрузки PDF: ' + err.message);
-                }
-            }
-
-            let isDrawing = false;
-            let startX, startY, rect;
-
-            fabricCanvas.on('mouse:down', function(opt) {
-                if (!pdfDoc || !isOcrMode) return;
-                const pointer = fabricCanvas.getPointer(opt.e);
-                startX = pointer.x;
-                startY = pointer.y;
-                isDrawing = true;
-
-                rect = new fabric.Rect({
-                    left: startX,
-                    top: startY,
-                    width: 0,
-                    height: 0,
-                    fill: 'rgba(59, 130, 246, 0.15)',
-                    stroke: '#3b82f6',
-                    strokeWidth: 2,
-                    strokeDashArray: [6, 4],
-                    selectable: false,
-                    evented: false,
-                });
-                fabricCanvas.add(rect);
-                fabricCanvas.renderAll();
-            });
-
-            fabricCanvas.on('mouse:move', function(opt) {
-                if (!isDrawing || !rect) return;
-                const pointer = fabricCanvas.getPointer(opt.e);
-                const width = pointer.x - startX;
-                const height = pointer.y - startY;
-                if (width > 0) rect.set({ width });
-                else {
-                    rect.set({ left: pointer.x, width: Math.abs(width) });
-                }
-                if (height > 0) rect.set({ height });
-                else {
-                    rect.set({ top: pointer.y, height: Math.abs(height) });
-                }
-                fabricCanvas.renderAll();
-            });
-
-            fabricCanvas.on('mouse:up', function() {
-                if (isDrawing && rect) {
-                    isDrawing = false;
-                    if (rect.width < 10 || rect.height < 10) {
-                        fabricCanvas.remove(rect);
-                        ocrHint.textContent = '⚠️ Выделите область побольше';
-                    } else {
-                        selectedRect = rect;
-                        ocrHint.textContent = '✅ Область выделена. Двойной клик для OCR';
-                    }
-                    fabricCanvas.renderAll();
-                }
-            });
-
-            fabricCanvas.on('mouse:dblclick', function(opt) {
-                if (!selectedRect) return;
-                if (opt.target === selectedRect) {
-                    performOCR();
-                }
-            });
-
-            async function performOCR() {
-                if (!pdfDoc || !selectedRect) {
-                    alert('Сначала выделите область');
-                    return;
-                }
-
-                const rect = selectedRect;
-                const canvas = pdfCanvas;
-                const ctx = canvas.getContext('2d');
-
-                const x = rect.left;
-                const y = rect.top;
-                const w = rect.width;
-                const h = rect.height;
-
-                const tempCanvas = document.createElement('canvas');
-                tempCanvas.width = w;
-                tempCanvas.height = h;
-                const tempCtx = tempCanvas.getContext('2d');
-                tempCtx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
-
-                ocrHint.textContent = '⏳ OCR распознаёт...';
-                try {
-                    const { data: { text } } = await Tesseract.recognize(
-                        tempCanvas,
-                        'rus+eng',
-                        { logger: m => console.log(m) }
-                    );
-                    if (text.trim().length === 0) {
-                        ocrHint.textContent = '⚠️ Текст не найден';
-                        return;
-                    }
-                    ocrTextArea.value = text.trim();
-                    modalOverlay.classList.add('active');
-                    ocrHint.textContent = '✏️ Редактируйте текст в окне';
-                } catch (err) {
-                    ocrHint.textContent = '❌ Ошибка OCR: ' + err.message;
-                }
-            }
-
-            async function applyEdits() {
-                if (!pdfDoc || !currentFile) {
-                    alert('Сначала загрузите PDF');
-                    return;
-                }
-
-                const objects = fabricCanvas.getObjects();
-                const textObjects = objects.filter(obj => obj.type === 'textbox' || obj.type === 'text');
-
-                if (textObjects.length === 0) {
-                    alert('Нет правок для применения');
-                    return;
-                }
-
-                const textObj = textObjects[0];
-                const oldText = ocrTextArea.value || '';
-
-                if (!oldText) {
-                    alert('Нет распознанного текста для замены');
-                    return;
-                }
-
-                const newText = textObj.text;
-
-                const formData = new FormData();
-                formData.append('file', currentFile);
-                formData.append('page_number', currentPage);
-                formData.append('old_text', oldText);
-                formData.append('new_text', newText);
-
-                ocrHint.textContent = '⏳ Отправка на сервер...';
-                applyEditsBtn.disabled = true;
-
-                try {
-                    const response = await fetch(`${API_URL}/edit-pdf`, {
-                        method: 'POST',
-                        body: formData,
-                    });
-
-                    if (!response.ok) {
-                        const error = await response.json();
-                        throw new Error(error.detail || 'Ошибка сервера');
-                    }
-
-                    const blob = await response.blob();
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'edited_document.pdf';
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-
-                    ocrHint.textContent = '✅ Правки применены! PDF скачан.';
-                } catch (err) {
-                    ocrHint.textContent = '❌ Ошибка: ' + err.message;
-                    alert('Ошибка: ' + err.message);
-                } finally {
-                    applyEditsBtn.disabled = false;
-                }
-            }
-
-            fileInput.addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                if (file && file.type === 'application/pdf') {
-                    loadPDF(file);
-                }
-                this.value = '';
-            });
-
-            ocrModeBtn.addEventListener('click', function() {
-                isOcrMode = !isOcrMode;
-                if (isOcrMode) {
-                    ocrModeBtn.textContent = '🔍 OCR активен';
-                    ocrModeBtn.style.background = '#3b82f6';
-                    ocrModeBtn.style.color = 'white';
-                    ocrHint.textContent = '🖱️ Выделите область текста (зажмите и тяните)';
-                    fabricCanvas.selection = false;
-                } else {
-                    ocrModeBtn.textContent = '🔍 OCR режим';
-                    ocrModeBtn.style.background = '#0f172a';
-                    ocrModeBtn.style.color = 'white';
-                    ocrHint.textContent = 'Режим OCR выключен';
-                    fabricCanvas.selection = true;
-                    if (selectedRect) {
-                        fabricCanvas.remove(selectedRect);
-                        selectedRect = null;
-                    }
-                }
-                fabricCanvas.renderAll();
-            });
-
-            clearBtn.addEventListener('click', function() {
-                const objects = fabricCanvas.getObjects();
-                const toRemove = objects.filter(obj => obj !== selectedRect);
-                toRemove.forEach(obj => fabricCanvas.remove(obj));
-                if (selectedRect) {
-                    fabricCanvas.remove(selectedRect);
-                    selectedRect = null;
-                }
-                fabricCanvas.renderAll();
-                ocrHint.textContent = '🧹 Все правки удалены';
-            });
-
-            applyEditsBtn.addEventListener('click', applyEdits);
-
-            prevPage.addEventListener('click', () => {
-                if (currentPage > 1) {
-                    currentPage--;
-                    renderPage(currentPage);
-                }
-            });
-
-            nextPage.addEventListener('click', () => {
-                if (currentPage < totalPages) {
-                    currentPage++;
-                    renderPage(currentPage);
-                }
-            });
-
-            pageInput.addEventListener('change', function() {
-                const page = parseInt(this.value);
-                if (page >= 1 && page <= totalPages) {
-                    currentPage = page;
-                    renderPage(currentPage);
-                }
-            });
-
-            cancelEditBtn.addEventListener('click', () => {
-                modalOverlay.classList.remove('active');
-                ocrHint.textContent = 'Редактирование отменено';
-            });
-
-            saveEditBtn.addEventListener('click', function() {
-                const newText = ocrTextArea.value.trim();
-                if (!newText) {
-                    alert('Текст не может быть пустым');
-                    return;
-                }
-
-                if (!selectedRect) {
-                    alert('Нет выделенной области');
-                    return;
-                }
-
-                fabricCanvas.remove(selectedRect);
-                selectedRect = null;
-
-                const rectBounds = {
-                    left: rect.left,
-                    top: rect.top,
-                    width: rect.width,
-                    height: rect.height,
-                };
-
-                let fontSize = Math.min(rectBounds.width / newText.length * 1.8, rectBounds.height * 0.8);
-                fontSize = Math.min(fontSize, 40);
-                fontSize = Math.max(fontSize, 10);
-
-                const textObj = new fabric.Textbox(newText, {
-                    left: rectBounds.left,
-                    top: rectBounds.top,
-                    width: rectBounds.width,
-                    fontSize: fontSize,
-                    fill: '#0f172a',
-                    backgroundColor: 'rgba(255, 255, 255, 0.92)',
-                    padding: 12,
-                    borderColor: '#3b82f6',
-                    cornerColor: '#3b82f6',
-                    cornerSize: 8,
-                    transparentCorners: false,
-                    fontFamily: 'Inter, sans-serif',
-                    textAlign: 'left',
-                    lineHeight: 1.4,
-                });
-
-                fabricCanvas.add(textObj);
-                fabricCanvas.setActiveObject(textObj);
-                fabricCanvas.renderAll();
-
-                ocrHint.textContent = '✅ Текст добавлен. Нажмите "Применить правки" для сохранения в PDF';
-                modalOverlay.classList.remove('active');
-            });
-
-            modalOverlay.addEventListener('click', function(e) {
-                if (e.target === modalOverlay) {
-                    modalOverlay.classList.remove('active');
-                }
-            });
-
-            ocrTextArea.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                    e.preventDefault();
-                    saveEditBtn.click();
-                }
-            });
-
-            window.addEventListener('resize', function() {
-                if (pdfDoc) renderPage(currentPage);
-            });
-
-            console.log('PDF OCR Editor PRO ready');
-            console.log('API URL:', API_URL);
-        })();
-    </script>
+    <!-- Библиотеки -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="js/converter.js" type="module"></script>
 </body>
 </html>
