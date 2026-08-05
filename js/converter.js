@@ -31,29 +31,21 @@ export function initConverter() {
     });
 
     // ============================================================
-    // Drag & Drop - ПОЛНОСТЬЮ БЛОКИРУЕМ ВСЕ СОБЫТИЯ
+    // Drag & Drop - ПОЛНОСТЬЮ БЛОКИРУЕМ ВСЕ СОБЫТИЯ БРАУЗЕРА
     // ============================================================
     
-    // Блокируем все события на уровне документа
+    // 1. Блокируем стандартное поведение на ВСЕМ документе
     function preventDefaults(e) {
         e.preventDefault();
         e.stopPropagation();
     }
 
-    // Вешаем на все события, связанные с перетаскиванием
-    document.addEventListener('dragenter', preventDefaults, false);
-    document.addEventListener('dragover', preventDefaults, false);
-    document.addEventListener('dragleave', preventDefaults, false);
-    document.addEventListener('drop', preventDefaults, false);
-
-    // Блокируем контекстное меню при перетаскивании
-    document.addEventListener('contextmenu', (e) => {
-        if (e.target.closest('.drop-zone')) {
-            e.preventDefault();
-        }
+    // События на документе (глобальная блокировка)
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        document.addEventListener(eventName, preventDefaults, false);
     });
 
-    // События для зоны загрузки - только визуальные эффекты
+    // 2. Специальные обработчики для drop-zone с визуальной обратной связью
     dropZone.addEventListener('dragenter', (e) => {
         preventDefaults(e);
         dropZone.classList.add('dragover');
@@ -69,14 +61,12 @@ export function initConverter() {
         dropZone.classList.remove('dragover');
     });
 
-    // ОСНОВНОЕ СОБЫТИЕ DROP - здесь обрабатываем файлы
     dropZone.addEventListener('drop', (e) => {
         preventDefaults(e);
         dropZone.classList.remove('dragover');
         
-        // Получаем файлы из события
         const droppedFiles = e.dataTransfer.files;
-        if (droppedFiles && droppedFiles.length > 0) {
+        if (droppedFiles.length > 0) {
             handleFiles(droppedFiles);
         }
     });
@@ -87,14 +77,17 @@ export function initConverter() {
     });
 
     fileInput.addEventListener('change', (e) => {
-        if (e.target.files && e.target.files.length > 0) {
+        if (e.target.files.length > 0) {
             handleFiles(e.target.files);
             fileInput.value = '';
         }
     });
 
+    // ============================================================
     // Обработка файлов
+    // ============================================================
     async function handleFiles(fileList) {
+        // Поддерживаемые расширения: .do (PDF с переименованным расширением) и все изображения
         const validExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'svg', 'do'];
         const validFiles = Array.from(fileList).filter(f => {
             const ext = f.name.split('.').pop().toLowerCase();
@@ -311,8 +304,10 @@ export function initConverter() {
                 progressPercent.textContent = percent + '%';
 
                 if (file.isDoFile) {
+                    // Для .do файлов - просто переименовываем в .pdf
                     await convertDoFile(file);
                 } else {
+                    // Для изображений - конвертируем в PDF
                     const pdfDoc = await PDFDocument.create();
                     await convertImageToPdf(pdfDoc, file, quality);
                     const pdfBytes = await pdfDoc.save();
